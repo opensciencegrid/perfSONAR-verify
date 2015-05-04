@@ -1,9 +1,9 @@
 #!/usr/bin/perl
 
 # Sample Usage:
-# verify.sh verify --central psds1.grid.iu.edu --ma throughput --n 12
-# verify.sh verify --central psds-itb.grid.iu.edu --ma histogram-owdelay --n 4
-# verify.sh verify --central fermicloud035.fnal.gov --port 9090 --ma histogram-owdelay --n 4
+# ./verify --central psds1.grid.iu.edu --ma throughput --n 12
+# ./verify --central psds-itb.grid.iu.edu --ma histogram-owdelay --n 4
+# ./verify --central fermicloud035.fnal.gov --port 9090 --ma histogram-owdelay --n 4
 
 # Requesting specific perfSONAR hosts; --action all => show Alteration, Validation, and Coverage differences
 # verify.sh verify --central psds.grid.iu.edu --ma throughput --n 2 --nodes 193.109.172.188,psum02.aglt2.org --start 142989031 --end 143051431 --action all
