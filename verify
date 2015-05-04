@@ -1,0 +1,579 @@
+#!/usr/bin/perl
+
+# Sample Usage:
+# verify.sh verify --central psds1.grid.iu.edu --ma throughput --n 12
+# verify.sh verify --central psds-itb.grid.iu.edu --ma histogram-owdelay --n 4
+# verify.sh verify --central fermicloud035.fnal.gov --port 9090 --ma histogram-owdelay --n 4
+
+# Requesting specific perfSONAR hosts; --action all => show Alteration, Validation, and Coverage differences
+# verify.sh verify --central psds.grid.iu.edu --ma throughput --n 2 --nodes 193.109.172.188,psum02.aglt2.org --start 142989031 --end 143051431 --action all
+
+use strict;
+use warnings;
+
+use DateTime;
+use Getopt::Long qw(:config bundling);
+use IO::File;
+use URI::Escape;
+
+use Carp;
+use Data::Dumper;
+
+use lib '/opt/perfsonar_ps/toolkit/lib/';
+use perfSONAR_PS::Client::Esmond::ApiFilters;
+use perfSONAR_PS::Client::Esmond::ApiConnect;
+
+$|=1;
+
+
+# TODO
+# Move to conf file
+my $VERIFY_HOME='/root/dev/gen/';
+my $TIMEOUT=90;
+my $VERBOSE=0;
+my $THROUGHPUT_RRANGE=20000;
+my $THROUGHPUT_WINDOW=7200;
+my $LATENCY_RRANGE=1800;
+my $LATENCY_WINDOW=3600;
+
+my %opt=();
+GetOptions( \%opt,
+            "action=s",  # validate, cover, default: all
+            "central=s", # Central data store
+            "port=i",    # Port number
+            "ma=s",      # Measurement archive
+            "n=i",       # Number of nodes to test
+            "nodes=s",   # comma separated list of nodes
+            "start=i",   # UNIX start time
+            "end=i",     # UNIX end time
+            "debug"
+           );
+
+my $action = $opt{action} || 'all';
+if ( $action ne 'all' &&
+     $action ne 'validate' &&
+     $action ne 'cover' ) {
+    print "Specify for --action 'validate', 'cover', or exclude the option for both\n";
+    exit(0);
+}
+
+my $ds = $opt{central} || 'psds1.grid.iu.edu';
+my $port = $opt{port} || 80;
+
+if ( !$opt{ma} ) {
+    print "Specify a measurement archive (e.g., histogram-owdelay) with the --ma option\n";
+    exit(0);
+} elsif ( $opt{ma} ne 'throughput' && $opt{ma} ne 'histogram-owdelay' ) {
+    print "MA $opt{ma} is not supported.\n";
+    exit(0);
+}
+if ( !$opt{n} ) {
+    print "Specify a number of perfSONAR hosts to check with the --n option\n";
+    exit(0);
+}
+
+# Preset values
+$ENV{TZ}   = 'UTC';
+
+our $terminator= "$VERIFY_HOME/bin/terminator"; # script to kill a given process on timeout
+
+my $ma = $opt{ma};
+my $timeout = 0;
+my $date=undef;
+my $rrange=undef;
+my $window=undef;
+if ( $ma eq 'histogram-owdelay' ) {
+    $rrange = $LATENCY_RRANGE;
+    $window = $LATENCY_WINDOW;
+} elsif ( $ma eq 'throughput' ) {
+    $rrange = $THROUGHPUT_RRANGE;
+    $window = $THROUGHPUT_WINDOW;
+}
+
+my $now   = time();
+my $start = undef;
+my $end   = undef;
+if ( $opt{start} && $opt{end} ) {
+    $start = $opt{start};
+    $end   = $opt{end};
+} else {   # select "random" start time
+    $end   = $now;
+    $start = set_start_time($rrange,$window);
+}
+
+
+my $logtime = gmtime();
+print "\n\n__________________________________________________________\n\n";
+print "Started script at:   $logtime UTC\n";
+
+print "\nInitiating a sample comparison between $ma archives in the\n";
+print "Esmond data store ($ds:$port) and remote perfSONAR nodes.\n";
+print "Selected UTC start time: " . sec2date( $start ) . " (UNIX time: $start)\n";
+print "Selected UTC end   time: " . sec2date( $end ) . " (UNIX time: $end)\n";
+
+$date = gmtime();
+my $node_counts = undef;
+my @test_nodes  = ();
+my $test_nodes_ref = undef;
+my $test_ip_ref = undef;
+if ( $opt{nodes} ) {
+    $node_counts = $opt{n};
+    @test_nodes = split(',', $opt{nodes});
+    $test_nodes_ref = \@test_nodes;
+} else {
+    print "\n[$date] Obtaining list of nodes to test from Esmond central data store...\n";
+    ($node_counts,$test_nodes_ref,$test_ip_ref) = get_nodes($opt{ma},$opt{n},$start,$end);
+    print "$node_counts\n";
+    foreach my $node (@{$test_nodes_ref}) {
+        print "$node (" . $$test_ip_ref{$node} . ")\n";
+    }
+}
+
+$date = gmtime();
+print "\n[$date] Obtaining data from Esmond central data store...\n";
+my %central_nodes=();
+my @central=();
+my @all_central=();
+foreach my $node (@{$test_nodes_ref}) {
+    # Get data related to the node
+    my $res=undef;
+    my @args=();
+       push @args, $ma;
+       push @args, $node;
+       push @args, $start;
+       push @args, $end;
+       push @args, $node;
+    ($res,@central) = call_with_timeout('Central',\&gd,\@args,$TIMEOUT,$VERBOSE,'USR2');
+    if ( $central[0] !~ m/Error/  && $res == 1 ) {
+        push @{ $central_nodes{$node} }, @central;
+    } elsif ( $res == 1 ) {
+        print "Data in central store for $node rejected. Cause:\n";
+        print "    $central[0]\n";
+        $timeout = 0;
+    } else {
+        print "Data from central store unavailable. No comparisons possible at this time. Cause:\n";
+        print "    $central[0]\n";
+        end();
+        exit(0);
+    }
+}
+
+my $count = keys %central_nodes;
+if ( $count == 0 ) {
+    print "Data from central store unavailable. No comparisons possible at this time. Cause:\n";
+    print "    Data gathering timed out\n";
+    end();
+    exit(0);
+}
+
+print "\n\n__________\n\n";
+print "Obtaining data directly from perfSONAR nodes...\n";
+my %accepted_nodes=();
+my %remote_nodes=();
+my @remote=();
+my @all_remote=();
+foreach my $node (@{$test_nodes_ref}) {
+    # Get data from the remote node
+    #@remote = gd($ma,$node,$start,$end,$node);
+    my $res=undef;
+    my @args=();
+       push @args, $ma;
+       push @args, $node;
+       push @args, $start;
+       push @args, $end;
+       push @args, $node;
+    ($res,@remote) = call_with_timeout('Remote',\&gd,\@args,$TIMEOUT,$VERBOSE,'USR2');
+
+    # Exclude from comparison nodes that are unreachable or have timed out
+    if ( $remote[0] !~ m/Error/ && $res == 1 ) {
+        print "\nRemote node $node accepted\n\n";
+        $accepted_nodes{$node} = 1;
+        push @{ $remote_nodes{$node} }, @remote;
+    } elsif ( $res == 0 ) {
+        print "\nRemote node $node rejected. Cause:\n";
+        print "    $remote[0]\n\n";
+    } else {
+        print "\nRemote node $node rejected. Cause:\n";
+        print "    $remote[0]\n\n";
+    }
+}
+
+
+# Gather all data to be compared
+foreach my $node (keys %accepted_nodes) {
+    push @all_central, @{ $central_nodes{$node} } if ( defined $central_nodes{$node} );
+    push @all_remote,  @{ $remote_nodes{$node} } if ( defined $remote_nodes{$node} );
+}
+
+
+my $all_central_size = scalar @all_central;
+my $all_remote_size = scalar @all_remote;
+print "\nComparing $all_central_size records from the central store to $all_remote_size records from perfSONAR hosts\n";
+
+print "checking for discrepancies...\n";
+threewaycompare(\@all_central,\@all_remote,$action);
+
+end();
+
+
+# ---
+
+# execute a function call, but abort it if it takes too long to complete
+# if a signal other than the default ALRM is given, assume that the function being called uses
+# ALRMitself and use the given signal instead; for this case, we fork a child to give us the alternate
+# signal at the time of the timeout
+
+sub call_with_timeout {
+    my($desc,$fn,$args,$timeout,$verbose,$sigtouse)= @_;
+    return undef unless defined($fn);
+    $timeout= 60 unless defined $timeout;
+    $verbose= 1 unless defined $verbose;
+    $sigtouse= 'ALRM' unless defined $sigtouse;
+    print "---\n";
+    print "call_with_timeout(",join(',',$desc,$fn,'['.join(',',@{$args}).']',$timeout,$verbose,$sigtouse),")\n" if $verbose > 3;
+
+    my @res= ();
+    my $start= time();
+    my $timeoutpid= undef;
+
+    eval {
+        my $sighandler= sub {0 && print "$$: in signal handler for $_[0]\n";
+                             die "$$: $desc timed out with $_[0] after $timeout seconds" };
+        $SIG{$sigtouse}= $sighandler;
+        if ($sigtouse eq 'ALRM') {
+            alarm($timeout);
+        } else {
+            my $fncallingpid= $$;
+            $timeoutpid=fork();
+            if ($timeoutpid == 0) {   # Child process
+                exec($terminator,$sigtouse,$fncallingpid,$timeout,$verbose);
+                die "could not exec $terminator\n";
+            }
+        }
+
+        # Parent process
+        # on timeout, alarm handler above will execute and we'll fall out of this eval
+        # on normal exit, we'll fall out of the bottom of the eval with no error
+        print "$desc: starting call\n" if $verbose > 1;
+        print "&{$fn}(" . join(',',@{$args}) . ")\n" if $verbose > 1;
+        @res = &{$fn}(join(',',@{$args}));  # Call the function
+        print "$desc exited normally: ",join(',',@res),"\n" if $verbose > 4;
+        $SIG{$sigtouse}= 'IGNORE';
+        if ($sigtouse eq 'ALRM') {
+            alarm(0);
+        } else {
+            print "Verify ($$) finished in time; canceling terminator ($timeoutpid)\n" if $verbose > 2;
+            kill 'KILL', $timeoutpid;
+        }
+    };
+
+    my $elapsed= time()-$start;
+    #print "waitpid($timeoutpid)\n" if defined($timeoutpid);
+    if ($@) {
+        if ($@ =~ /timed out with/) { # we timed out
+            print "$@\n";
+            return (0);
+        } else { # the method call did a die
+            # propagate
+            $SIG{$sigtouse}= 'IGNORE';
+            if ($sigtouse eq 'ALRM') {
+                alarm(0);
+            } else {
+                kill $timeoutpid;
+            }
+            die;
+        }
+    }
+    print qq{$desc exited normally [elapsed=$elapsed]\n};
+    return (1,@res);
+}
+
+
+sub end {
+    $logtime = gmtime();
+    print "Ended script at:   $logtime UTC\n";
+}
+
+
+sub set_start_time {
+    my ($range, $offset) = @_;
+
+    my $rand  = int( rand($range));
+    my $start = $now - $rand - $offset;
+
+    return $start;
+}
+
+
+sub get_nodes {
+    my ($ma, $n) = @_;
+
+    my %mon=();
+    my @test_nodes=();
+    my %test_ips = ();
+
+    # Define filters
+    my $filters = new perfSONAR_PS::Client::Esmond::ApiFilters();
+    $filters->time_range(3600*$opt{last}) if ( $opt{last} );
+    $filters->time_start($opt{start}) if ( $opt{start} );
+    $filters->event_type("$ma");
+
+    # Connect to api
+    my $encoded_host = uri_escape($ds);
+    my $client = new perfSONAR_PS::Client::Esmond::ApiConnect(
+        url => "http://$encoded_host:$port/esmond/perfsonar/archive",
+        filters => $filters
+    );
+    end() if($client->error);
+    croak ( "Central data store is not responding. No comparisons possible at this time. Cause:\n" . 
+          $client->error ) if($client->error);
+
+    # Get measurements matching filters
+    my $md = $client->get_metadata();
+    end() if($client->error);
+    croak ( "Meta-data unavailable. No comparisons possible at this time. Cause:\n" .
+          $client->error ) if($client->error);
+
+    # Identify all unique monitor hosts
+    foreach my $m ( @{$md} ) {
+        my $mon = $m->measurement_agent();
+        $mon{$mon} = 1;
+    }
+
+    my $total_nodes = scalar keys %mon;
+
+    while ( scalar @test_nodes < $n ) {
+        my $choice = (keys %mon)[rand keys %mon];
+        # Use DNS name if available
+        my $node_name=undef;
+        my $node_str = `host $choice`;
+        if ( $node_str =~ m/not found/ ) {
+            $node_name = $choice;
+        } else {
+            my @node = split(' ', $node_str);
+            $node_name = $node[-1];
+            chop $node_name;
+        }
+        push @test_nodes, $node_name;
+        $test_ips{$node_name} = $choice;
+    }
+
+    return ("Selected test nodes ($n out of $total_nodes)",\@test_nodes,\%test_ips);
+}
+
+
+sub gd {
+    my ($list) = @_;
+
+    my ($ma,$mon,$start,$end,$datastore) = split(',',$list);
+
+    my @results=();
+    my $error=undef;
+
+    # Now obtain data for each path with the retrieved monitoring hosts
+    # Note: Use time_start() on metadata, time_end() on data
+    my $filters = new perfSONAR_PS::Client::Esmond::ApiFilters();
+    $filters->time_start($start) if ( $start );     # Filters on metadata time_updated value
+    $filters->event_type($ma);
+    $filters->measurement_agent($mon);
+
+
+        # Connect to api
+        $date = gmtime();
+        print "[$date] Connect to api\n";
+        my $encoded_host = uri_escape($datastore);
+    
+        my $clpath = new perfSONAR_PS::Client::Esmond::ApiConnect(
+            url => "http://$encoded_host/esmond/perfsonar/archive",
+            filters => $filters
+        );
+        if($clpath->error) {
+            $error = "Error - [$datastore] ($encoded_host) - " . $clpath->error;
+            my @error=();
+            push @error, $error;
+            return @error;
+        }
+        # Get measurements matching filters
+        $date = gmtime();
+        print "[$date] Get measurements matching filters\n";
+        my $pd;
+            $pd = $clpath->get_metadata();
+            if($clpath->error) {
+                $error = "Error - [$datastore] ($encoded_host) - " . $clpath->error;
+                my @error=();
+                push @error, $error;
+                return @error;
+            }
+        
+            print Dumper($pd) if ( $opt{debug} );
+        
+            foreach my $p ( @{$pd} ) {
+                print Dumper($p) if ( $opt{debug} );
+                # get data of a particular event type
+                my $mon_ip = $p->measurement_agent();
+                my $src_ip = $p->source();
+                my $dst_ip = $p->destination();
+                my $mk     = $p->metadata_key();
+                my $et     = $p->get_event_type("$ma");
+                $et->filters->time_end($end);            # Add time_end filter on data
+                my $data   = $et->get_data();
+                if($et->error) {
+                    $error = "Error - [$datastore] ($encoded_host) - " . $et->error;
+                    my @error=();
+                    push @error, $error;
+                    return @error;
+                }
+                # get all data
+                $date = gmtime();
+                print "[$date] Get data\n" if ( $opt{debug} );
+                if ( $ma eq 'throughput' ) {                             # throughput
+                    foreach my $d ( @{$data} ) {
+                        my $rec = $d->ts . "," . $d->datetime . ",$mon_ip,$src_ip,$dst_ip," . $d->val . ",$mk";
+                        push @results, $rec;
+                        print "$rec\n" if ( $opt{debug} );
+                        print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$ma\/base\?start-time=" .
+                              $d->ts . "\&end-time=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                    }
+                } elsif ( $ma eq 'histogram-owdelay' ) {                 # histogram-owdelay
+                    #get histogram statistics summary for base data
+                    my $stats_summ = $et->get_summary('statistics', 0);
+                    next unless($stats_summ);
+                    my $stats_data = $stats_summ->get_data();
+                    if($stats_summ->error) {
+                        $error = "Error - [$datastore] ($encoded_host) - " . $stats_summ->error;
+                        my @error=();
+                        push @error, $error;
+                        return @error;
+                    }
+                    foreach my $stats_d(@{$stats_data}){
+                        my $rec = $stats_d->ts . "," . $stats_d->datetime . ",$mon_ip,$src_ip,$dst_ip," .  $stats_d->{val}->{median}. ",$mk";
+                        push @results, $rec;
+                        print "$rec\n" if ( $opt{debug} );
+                        print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$ma\/base\?start-time=" .
+                              $stats_d->ts . "\&end-time=" . $stats_d->ts . "\&format=json\n" if ( $opt{debug} );
+                    }
+                }
+            }
+
+    return @results;
+}
+
+
+sub threewaycompare {
+    my ($cref,$rref,$action) = @_;
+
+    my %set1=();             # hash lookup table for $set1
+    my %set2=();             # hash lookup table for $set2
+    my %mkey1=();            # hash lookup table for metadata key from $set1
+    my %mkey2=();            # hash lookup table for metadata key from $set2
+    my @not_in_set2=();      # keys in $set1 not found in $set2
+    my @not_in_set1=();      # keys in $set2 not found in $set1
+    my @diff_count=();       # Entries in both $set1 and $set2 with differing values
+    my @same=();             # Entries in both $set1 and $set2 with identical values
+
+    my @fields=();
+    my $item;
+
+    # Sample record
+    # 1428713029,2015-04-11T00:43:49,128.40.4.25,193.62.56.9,128.40.4.25,3842545892,d899caeca2c0482c9f776e304dbe300f
+    # 0          1                   2           3           4           5          6
+    # Want:
+    # $key   -> [0..4]
+    # $value -> [5]
+    # $mkey  -> [6]
+
+    # Generate hash tableis
+    foreach my $i (@{$cref}) {
+        my @fields = split(',', $i);
+        my $key = join(',', @fields[0..4]);
+        my $value = $fields[5];
+        my $mkey = $fields[6];
+        #print "c: " . join(',', @fields) . "\n";
+        #print "   \$key: $key, \$value: $value, \$mkey: $mkey\n";
+        $set1{$key} = $value;
+        $mkey1{$key} = $mkey;
+    }
+    #print "\n";
+
+    foreach my $j (@{$rref}) {
+        my @fields = split(',', $j);
+        my $key = join(',', @fields[0..4]);
+        my $value = $fields[5];
+        my $mkey = $fields[6];
+        #print "r: " . join(',', @fields) . "\n";
+        #print "   \$key: $key, \$value: $value, \$mkey: $mkey\n";
+        $set2{$key} = $value;
+        $mkey2{$key} = $mkey;
+    }
+
+    # Comparing
+    while ( my ($key, $val) = each(%set2) ) {
+        if ( $set1{$key} eq '') {
+            push (@not_in_set1, $key);
+        } elsif ( $set1{$key} ne $val) {
+            push (@diff_count, $key);
+        } elsif ( $set1{$key} eq $val) {
+            push (@same, $key);
+        }
+    }
+    while ( my $key = each(%set1)) {
+        if ( $set2{$key} eq '') {
+            push (@not_in_set2, $key);
+        }
+    }
+
+
+
+    # Display any discrepancies found
+
+    print "\n\nAlteration - Items in both the central store and the remote perfSONAR hosts where measures differ:\n";
+    if (!@diff_count) {
+        print "          -- NONE --\n";
+    } else {
+        @diff_count = sort by_key @diff_count;
+        foreach my $key (@diff_count) {
+            print "c: $key: $mkey1{$key} $set1{$key}\n";
+            print "r: $key: $mkey2{$key} $set2{$key}\n\n";
+        }
+    }
+
+    if ( $action eq 'validate' || $action eq 'all' ) {
+        print "\nValidation - Items in the central store not in the remote perfSONAR hosts:\n";
+        if (!@not_in_set2) {
+            print "          -- NONE --\n";
+        } else {
+            @not_in_set2 = sort by_key @not_in_set2;
+            foreach my $key (@not_in_set2) {
+                print "c: $key: $mkey1{$key} $set1{$key}\n";
+            }
+        }
+    }
+
+    if ( $action eq 'cover' || $action eq 'all' ) {
+        print "\nCoverage   - Items in the remote perfSONAR hosts not in the central store:\n";
+        if (!@not_in_set1) {
+            print "          -- NONE --\n"
+        } else {
+            @not_in_set1 = sort by_key @not_in_set1;
+            foreach my $key (@not_in_set1) {
+                print "r: $key: $mkey2{$key} $set2{$key}\n";
+            }
+        }
+    }
+}
+
+sub by_key {
+ ( $::a cmp $::b );
+}
+
+
+sub sec2date {
+    my $sec = shift;
+
+    my ($seconds, $minutes, $hours, $dayOfMonth, $month, $year) = (gmtime $sec)[0,1,2,3,4,5];
+    $month += 1;
+    $year += 1900;
+
+    return sprintf "%2.2d\/%2.2d\/%2.2d %2.2d:%2.2d:%2.2d",
+                   $month, $dayOfMonth, $year, $hours, $minutes, $seconds;
+}
