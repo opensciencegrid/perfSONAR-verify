@@ -1,0 +1,25 @@
+#!/usr/bin/perl -w
+
+# send a given signal to a given PID after a given delay
+
+use FileHandle;
+STDOUT->autoflush(1);
+
+my($sig,$targetpid,$wait,$verbose)= @ARGV;
+$wait= 60 unless defined($wait);
+$verbose= 1 unless defined($verbose);
+
+print "$0 ($$) will send SIG $sig to verify ($targetpid) after $wait seconds\n" if $verbose > 1;
+
+my $now= time();
+my $end=$now+$wait;
+do {
+    print "Terminator ($$) will sleep for ",$end-$now,"\n" if $verbose > 2;
+    sleep($end-$now);
+    $now= time();
+} while ($now < $end);
+
+print "$$: sending SIG $sig to $targetpid\n" if $verbose;
+kill $sig, $targetpid;
+
+exit(0);
