@@ -23,8 +23,8 @@ Options:
 --end        - Optional. Select records with a UTC epoch seconds time stamp <= this value  
 --start_date - Optional. Like start but uses a UTC date with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]  
 --end_date   - Optional. Like end but uses a UTC date with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]  
---display    - Optional. Select test results to display. Default action is to show all tests  
-               (either by not using it or with --display all)  
+--display     - Optional. Select test results to display. Default action is to show all tests  
+                (either by not using it or with --display all)  
                --display validate => show alteration and validation;  
                --display coverage => show alteration and coverage.  
 --update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.  
