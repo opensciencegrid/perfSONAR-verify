@@ -21,12 +21,14 @@ Options:
                (if specific nodes are desired)  
 --start      - Optional. Select records with a UTC epoch seconds time stamp >= this value  
 --end        - Optional. Select records with a UTC epoch seconds time stamp <= this value  
---start_date - Like start but uses a UTC date with format [M]M/[D]D/YY[YY][,hh[:mm[:ss]]]  
---end_date   - Like end but uses a UTC date with format [M]M/[D]D/YY[YY][,hh[:mm[:ss]]]  
+--start_date - Optional. Like start but uses a UTC date with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]  
+--end_date   - Optional. Like end but uses a UTC date with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]  
 --display    - Optional. Select test results to display. Default action is to show all tests  
                (either by not using it or with --display all)  
                --display validate => show alteration and validation;  
                --display coverage => show alteration and coverage.  
+--update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.  
+               This option forces an update to occur prior to running verify. Note: The update may take a few minutes.  
 
 Sample Usage:  
 - Compare pack-count-sent data between the central store (psds1.grid.iu.edu) and two script-selected perfSONAR hosts that collect pack-count-sent data for a script-selected time range  
