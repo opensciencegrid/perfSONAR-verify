@@ -1,9 +1,12 @@
 # perfSONAR-verify
-<P>Verify is a Perl script that compares perfSONAR data in remote perfSONAR hosts to the same data collected in centralized data stores. Its purpose is to confirm that the data centralization process is complete and accurate.</P>
+Verify is a Perl script that compares perfSONAR data in remote perfSONAR hosts to the same data collected in centralized data stores. Its purpose is to confirm that the data centralization process is complete and accurate.
 
 Three main tests are performed:
+
 1) Alteration - This checks for items in both the central store and the remote perfSONAR hosts where measures differ.
+
 2) Validation - This checks for items in the central store that are not in the remote perfSONAR hosts.
+
 3) Coverage - This checks for items in the remote perfSONAR hosts that are not in the central store.
 
 Typically, the script will be executed from cron, specifying a central repository to test with, a mesh or measurement archive to use, and the number of perfSONAR hosts to include in the test. The script will select the hosts, start, and end times at "random", perform the tests, and return results. It is also possible to specify the perfSONAR hosts to test against, along with start and end times. This is helpful when interested in repeating the same test.
