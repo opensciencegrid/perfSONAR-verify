@@ -37,16 +37,26 @@ Typically, the script will be executed from cron, specifying a central repositor
 
 #### Sample Usage  
 - Compare pack-count-sent data between the central store (psds1.grid.iu.edu) and two script-selected perfSONAR hosts that collect pack-count-sent data for a script-selected time range  
-`verify --central psds1.grid.iu.edu --test packet-count-sent --n 2`
+```
+verify --central psds1.grid.iu.edu --test packet-count-sent --n 2
+```
 
 - Compare packet-loss-rate data between the central data store and one script-selected host, returning only alteration and validation differences; i.e., ignoring coverage test results  
-`verify --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display validate`
+```
+verify --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display validate
+```
 
 - Compare packet-count-sent data from the central repository, using port 9090, with data from two specified hosts for the specified time range  
-`verify --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent --n 2 --nodes   sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281`
+```
+verify --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent --n 2 --nodes   sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
+```
 
 - Request a comparison with specific perfSONAR hosts in a given mesh for a specified time range  
-`verify --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 07/02/2015,05:29:28 --end_date 07/02/2015,10:52:01 --display all`
+```
+verify --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 07/02/2015,05:29:28 --end_date 07/02/2015,10:52:01 --display all
+```
 
 - Allow user to select a test type and mesh from option lists  
-`verify --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2`
+```
+verify --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2`
+```
