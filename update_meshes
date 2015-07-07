@@ -1,0 +1,108 @@
+#!/usr/bin/perl
+
+# This script obtains all perfSONAR meshes and their respective members (nodes)
+
+# Usage:
+# ./update_meshes
+
+# Input:
+# None provided. Data obtained directly from mesh repository.
+# See $PSMESH_LINK
+
+# Output:
+# A JSON formatted file having the form:
+#{
+#    "USATLAS Latency Mesh Test": {
+#         "members": [
+#             "lhcperfmon.bnl.gov",
+#             "uct2-net1.mwt2.org",
+#             "iut2-net1.iu.edu",
+#             "mwt2-ps01.campuscluster.illinois.edu",
+#             "psnr-farm10.slac.stanford.edu",
+#             "psum01.aglt2.org",
+#             "psmsu01.aglt2.org",
+#             "ps1.ochep.ou.edu",
+#             "psuta01.atlas-swt2.org",
+#             "lutps1.lunet.edu",
+#             "atlas-npt1.bu.edu"
+#         ],
+#         "type": "mesh"
+#    },
+# ...
+#}
+
+
+# TODO
+# Move $MESHES,$PSMESH_LINK to a conf file
+# Change output path
+# Call library
+
+# The links below are available from https://myosg.grid.iu.edu/pfmesh
+
+# USATLAS Mesh Config   https://myosg.grid.iu.edu/psmesh/json/name/us-atlas
+# USCMS Mesh Config     https://myosg.grid.iu.edu/psmesh/json/name/us-cms
+# CA Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/ca-all
+# DE Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/de-all
+# ES Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/es-all
+# FR Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/fr-all
+# IT ATLAS Mesh Config  https://myosg.grid.iu.edu/psmesh/json/name/it-atlas
+# IT CMS Mesh Config    https://myosg.grid.iu.edu/psmesh/json/name/it-cms
+# LHCONE Mesh Config    https://myosg.grid.iu.edu/psmesh/json/name/lhcone-all
+# ND Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/nd-all
+# OPN Config            https://myosg.grid.iu.edu/psmesh/json/name/opn-all
+# RU Config             https://myosg.grid.iu.edu/psmesh/json/name/ru-all
+# TW Config             https://myosg.grid.iu.edu/psmesh/json/name/tw-all
+# UK Config             https://myosg.grid.iu.edu/psmesh/json/name/uk-all
+# Bandwidth tests between all WLCG hosts        https://myosg.grid.iu.edu/psmesh/json/name/wlcg-all
+# OSG Grid Operations Center Test Mesh Config   https://myosg.grid.iu.edu/psmesh/json/name/osg-goc
+# perfSONAR Testbed                             https://myosg.grid.iu.edu/psmesh/json/name/ps-testbed
+# Dual-Stack Mesh Config                        https://myosg.grid.iu.edu/psmesh/json/name/dual-stack
+# Latin America Config                          https://myosg.grid.iu.edu/psmesh/json/name/la-all
+# Latency tests between all WLCG hosts          https://myosg.grid.iu.edu/psmesh/json/name/wlcg-latency-all
+# Debug Mesh (temp)                             https://myosg.grid.iu.edu/psmesh/json/name/DebugMesh
+# Belle II Mesh                                 https://myosg.grid.iu.edu/psmesh/json/name/BelleII
+# Global Mesh                                   https://myosg.grid.iu.edu/psmesh/json/name/global
+# All Mesh config                               https://myosg.grid.iu.edu/psmesh/all
+
+use strict;
+use warnings;
+
+use JSON;
+use FindBin qw($Bin);
+
+my $MESHES      = "$Bin/meshes1";
+my $PSMESH_LINK = "https://myosg.grid.iu.edu/psmesh/all";
+
+my $fh;
+open($fh, '>', "$MESHES");
+update_meshes();
+
+# Obtain all mesh links, available in the form:
+# [
+#     {
+#         include: [
+#         "https://myosg.grid.iu.edu/psmesh/json/name/us-atlas"
+#         ]
+#     },
+# ...
+# ]
+sub update_meshes {
+    my %mm = ();
+
+    # Obtain mesh list
+    my $mesh_links = decode_json(`curl -s $PSMESH_LINK | python -mjson.tool`);
+    foreach my $link (@{$mesh_links}) {
+        # Obtain mesh members
+        my $member_md = decode_json(`curl -s "$link->{include}->[0]" | python -mjson.tool`);
+        foreach my $test (@{$member_md->{tests}}) {
+            $mm{$test->{description}} = $test->{members};
+        }
+    }
+
+    # Encode hash
+    my $jm = JSON->new->allow_nonref;
+    my $jm_text = $jm->encode(\%mm);
+
+    # Output results
+    print $fh "$jm_text\n";
+}

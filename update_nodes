@@ -1,0 +1,102 @@
+#!/usr/bin/perl
+
+# This script obtains mesh information from the output of related script
+# "update_meshes" and outputs all node names and respective IP addresses
+
+# Usage:
+# ./update_nodes
+
+# Input:
+# The JSON mesh file produced by the update_meshes script, having the form:
+#{
+#    "USATLAS Latency Mesh Test": {
+#         "members": [
+#             "lhcperfmon.bnl.gov",
+#             "uct2-net1.mwt2.org",
+#             "iut2-net1.iu.edu",
+#             "mwt2-ps01.campuscluster.illinois.edu",
+#             "psnr-farm10.slac.stanford.edu",
+#             "psum01.aglt2.org",
+#             "psmsu01.aglt2.org",
+#             "ps1.ochep.ou.edu",
+#             "psuta01.atlas-swt2.org",
+#             "lutps1.lunet.edu",
+#             "atlas-npt1.bu.edu"
+#         ],
+#         "type": "mesh"
+#    },
+# ...
+#}
+
+# Output:
+# The nodes file, with each line a comma-separated node name and its IP address:
+# netmon00.grid.hep.ph.ic.ac.uk,146.179.247.74
+# pship01.csc.fi,109.105.125.232
+# ccperfsonar2.in2p3.fr,193.48.99.76
+# ...
+
+# Note: The get_node_name_ip function can handle reverse lookup, but in
+# this case, I believe input from the meshes always provides a host name.
+
+# TODO
+# Obtain path from a conf file
+# Change output path
+# Add call to library
+
+use strict;
+use warnings;
+
+use JSON;
+use FindBin qw($Bin);
+
+my %node = ();
+
+my $json = `cat $Bin/meshes`;
+
+my $fh;
+open($fh, '>', "$Bin/nodes");
+
+my $pd = decode_json($json);
+foreach my $mesh_key (keys %{$pd}) {
+    my @hosts=();
+    foreach my $member ( @{$pd->{$mesh_key}->{members}} ) {
+        next if ( $node{$member} ); # Node info has already been obtained
+        $node{$member} = 1;
+        my ($node_name,$node_ip) = get_node_name_ip($member);
+        print $fh "$node_name,$node_ip\n";
+    }
+}
+
+close $fh;
+
+
+sub get_node_name_ip {
+    my $node = shift;
+
+    my $node_name=undef;
+    my $node_ip=undef;
+
+    my $str = `host $node`;
+    my @lines = split('\n', $str);
+    foreach my $line (@lines) {
+        if ( $line =~ m/domain name pointer/ ) {
+            my @node = split(' ', $line);
+            $node_name = $node[-1];
+            $node_ip = $node;
+            chop $node_name; # remove trailing dot
+            return ($node_name, $node_ip)
+        } elsif ( $line =~ m/has address/    ) {
+            my @node = split(' ', $line);
+            my $node_ip = $node[-1];
+            my $node_name = $node;
+            return ($node_name, $node_ip)
+        } elsif ( $line =~ m/not found/  ) {
+            $node_name = $node;
+            $node_ip = $node;
+            return ($node_name, $node_ip)
+        } else {
+            # ignore
+            # May help to add "has IPv6 address" match here
+        }
+    }
+}
