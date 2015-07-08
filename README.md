@@ -17,22 +17,26 @@ Typically, the script will be executed from cron, specifying a central repositor
                failures, histogram-owdelay, histogram-ttl, packet-count-lost, packet-count-sent, packet-loss-rate,
                packet-retransmits, packet-retransmits-subintervals, packet-trace, throughput, throughput-subinterval
 --test_menu  - Integer. Allows selection of a test type from a list. Helpful when the test name is not known.
---n          - Integer. The number of perfSONAR nodes to select for testing
+--n          - Integer. The number of perfSONAR nodes to select for testing. Ignored when --nodes is used.
 --nodes      - Optional. A comma-separated list of perfSONAR host names or IP addresses to test with
                (if specific nodes are desired)
 --start      - Optional integer. Select records with a UTC epoch seconds time stamp >= this value
 --end        - Optional integer. Select records with a UTC epoch seconds time stamp <= this value
 --start_date - Optional. Like start but uses a UTC date string with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]
 --end_date   - Optional. Like end but uses a UTC date string with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]
+--last       - Optional. Designates the last so many time units as the start time. End time is "now".
+               Possible values are in the form of nw, nd, nh, nm, or ns, where n is a positive integer and
+               w = weeks, d = days, h = hours, m = minutes, s = secs.
 --display    - Optional string. Select test results to display. Default action is to show all tests
                (either by not using it or with --display all)
-               --display validate => show alteration and validation;
-               --display coverage => show alteration and coverage.
+               --display validate => show alteration and validation
+               --display coverage => show alteration and coverage
 --outc       - Optional path and file name. Outputs data collected from the central store to the given file.
 --outr       - Optional path and file name. Outputs data collected from the remote hosts to the given file.
 --update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.
                This option forces an update to occur prior to running verify. Note: The update may take a few minutes to
                complete and is meant to be used sparingly.
+--help       - Displays this information
 ```
 
 #### Sample Usage  
@@ -48,7 +52,7 @@ verify --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display va
 
 - Compare packet-count-sent data from the central repository, using port 9090, with data from two specified hosts for the specified time range  
 ```
-verify --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent --n 2 --nodes   sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
+verify --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent --nodes  sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
 ```
 
 - Request a comparison with specific perfSONAR hosts in a given mesh for a specified time range  
@@ -58,5 +62,5 @@ verify --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Me
 
 - Allow user to select a test type and mesh from option lists  
 ```
-verify --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2`
+verify --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2
 ```
