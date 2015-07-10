@@ -33,9 +33,7 @@
 
 
 # TODO
-# Move $MESHES,$PSMESH_LINK to a conf file
-# Change output path
-# Call library
+# use library
 
 # The links below are available from https://myosg.grid.iu.edu/pfmesh
 
@@ -70,12 +68,44 @@ use warnings;
 use JSON;
 use FindBin qw($Bin);
 
-my $MESHES      = "$Bin/meshes1";
-my $PSMESH_LINK = "https://myosg.grid.iu.edu/psmesh/all";
+# Read the config values
+my $conf_file = "$Bin/../conf/verify.conf";
+my %config = read_conf($conf_file);
+
+# Config variables
+my $DATA=$config{DATA};
+my $MESHES=$config{MESHES};
+my $PSMESH_LINK=$config{PSMESH_LINK};
+$DATA = "$Bin/../$DATA";
 
 my $fh;
-open($fh, '>', "$MESHES");
+open($fh, '>', "$DATA/$MESHES");
 update_meshes();
+
+# ---
+
+sub read_conf {
+    my $conf_file = shift;
+
+    my $ch=undef;
+    my %config=();
+    open( $ch, '<', $conf_file ) or die "Could not open configuration file '$conf_file'.\n";
+    while (<$ch>) {
+        next if ( $_ =~ m/^#/ );
+        chomp $_;
+        if ( $_ =~ m/=/ ) {
+            my ($param,$value) = split('=', $_);
+            my $junk;
+            ($value,$junk) = split('#', $value); # ignore inline comments
+            $param =~ s/^\s+|\s+$//g;            # do left/right space trim
+            $value =~ s/^\s+|\s+$//g;
+            $config{$param} = $value;
+        }
+    }
+    close $ch;
+    return %config;
+}
+
 
 # Obtain all mesh links, available in the form:
 # [
