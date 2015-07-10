@@ -39,9 +39,7 @@
 # this case, I believe input from the meshes always provides a host name.
 
 # TODO
-# Obtain path from a conf file
-# Change output path
-# Add call to library
+# use library
 
 use strict;
 use warnings;
@@ -49,14 +47,22 @@ use warnings;
 use JSON;
 use FindBin qw($Bin);
 
-my %node = ();
+# Read the config values
+my $conf_file = "$Bin/../conf/verify.conf";
+my %config = read_conf($conf_file);
 
-my $json = `cat $Bin/meshes`;
+# Config variables
+my $DATA=$config{DATA};
+my $MESHES=$config{MESHES};
+my $NODES=$config{NODES};
+$DATA = "$Bin/../$DATA";
 
 my $fh;
-open($fh, '>', "$Bin/nodes");
+my $json = `cat $DATA/$MESHES`;
+open($fh, '>', "$DATA/$NODES");
 
 my $pd = decode_json($json);
+my %node = ();
 foreach my $mesh_key (keys %{$pd}) {
     my @hosts=();
     foreach my $member ( @{$pd->{$mesh_key}->{members}} ) {
@@ -68,6 +74,30 @@ foreach my $mesh_key (keys %{$pd}) {
 }
 
 close $fh;
+
+# ---
+
+sub read_conf {
+    my $conf_file = shift;
+
+    my $ch=undef;
+    my %config=();
+    open( $ch, '<', $conf_file ) or die "Could not open configuration file '$conf_file'.\n";
+    while (<$ch>) {
+        next if ( $_ =~ m/^#/ );
+        chomp $_;
+        if ( $_ =~ m/=/ ) {
+            my ($param,$value) = split('=', $_);
+            my $junk;
+            ($value,$junk) = split('#', $value); # ignore inline comments
+            $param =~ s/^\s+|\s+$//g;            # do left/right space trim
+            $value =~ s/^\s+|\s+$//g;
+            $config{$param} = $value;
+        }
+    }
+    close $ch;
+    return %config;
+}
 
 
 sub get_node_name_ip {
