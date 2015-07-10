@@ -27,6 +27,10 @@ Typically, the script will be executed from cron, specifying a central repositor
 --last       - Optional. Designates the last so many time units as the start time. End time is "now".
                Possible values are in the form of nw, nd, nh, nm, or ns, where n is a positive integer and
                w = weeks, d = days, h = hours, m = minutes, s = secs.
+--delay      - Optional. Skip records with time stamps more recent than this many seconds ago. Default value is
+               stored in the conf file. This gives time for the central store to sync up with remote stores and
+               reduce false positives. It is ignored when start/end parameters are specified. It is referenced
+               otherwise.
 --display    - Optional string. Select test results to display. Default action is to show all tests
                (either by not using it or with --display all)
                --display validate => show alteration and validation
@@ -64,3 +68,9 @@ verify --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Me
 ```
 verify --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2
 ```
+
+#### Installation
+Set up subdirectories /bin, /conf, /data under a parent directory. Place executables under /bin, the conf file under /conf.
+There are two update executables, update_meshes and update_nodes, that will build two reference files under /data.
+Add the update scripts to cron to run at low frequency, probably once a day is enough.
+Add the verify script to cron to run frequently with whatever parameters are appropriate for the desired testing.
