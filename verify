@@ -1,14 +1,11 @@
 #!/usr/bin/perl
 
-# Sample Usage:
-# verify --central psds1.grid.iu.edu --test packet-count-lost --n 2
-# verify --central psds-itb.grid.iu.edu --test histogram-owdelay --n 4
-# verify --central fermicloud035.fnal.gov --port 9090 --test histogram-owdelay --n 4
-# verify --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display validate
+# This script compares perfSONAR data collected in central repositories to that
+# found in the original sources (perfSONAR hosts) and reports any observed
+# discrepancies and errors encountered.
 
-# Requesting specific perfSONAR hosts in a given mesh for a specified time range
-# --display all => show Alteration, Validation, and Coverage differences
-# ./verify2 --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 07/02/2015,05:29:28 --end_date 07/02/2015,10:52:01 --display all
+# For more information, use the --help option or see the README.md file under
+# https://github.com/opensciencegrid/perfSONAR-verify/
 
 use strict;
 use warnings;
@@ -16,6 +13,7 @@ use warnings;
 use DateTime;
 use Time::Local;
 use Getopt::Long qw(:config bundling);
+use FindBin qw($Bin $Script);
 use IO::File;
 use URI::Escape;
 use JSON;
@@ -26,40 +24,48 @@ use lib '/opt/perfsonar_ps/toolkit/lib/';
 use perfSONAR_PS::Client::Esmond::ApiFilters;
 use perfSONAR_PS::Client::Esmond::ApiConnect;
 
-use FindBin qw($Bin);
-
 $|=1;
 
-# TODO
-# Move to conf file
-my $VERIFY_HOME='/root/dev/gen/';
-my $TIMEOUT=60;
-my $VERBOSE=0;
-my $FAILURES_RRANGE=20000;
-my $FAILURES_WINDOW=14400;
-my $HISTOGRAM_OWDELAY_RRANGE=1800;
-my $HISTOGRAM_OWDELAY_WINDOW=900;
-my $HISTOGRAM_TTL_RRANGE=1800;
-my $HISTOGRAM_TTL_WINDOW=900;
-my $PACKET_COUNT_LOST_RRANGE=20000;
-my $PACKET_COUNT_LOST_WINDOW=900;
-my $PACKET_COUNT_SENT_RRANGE=20000;
-my $PACKET_COUNT_SENT_WINDOW=900;
-my $PACKET_LOSS_RATE_RRANGE=20000;
-my $PACKET_LOSS_RATE_WINDOW=900;
-my $PACKET_RETRANSMITS_RRANGE=20000;
-my $PACKET_RETRANSMITS_WINDOW=14400;
-my $PACKET_RETRANSMITS_SUBINTERVALS_RRANGE=20000;
-my $PACKET_RETRANSMITS_SUBINTERVALS_WINDOW=14400;
-my $PACKET_TRACE_RRANGE=20000;
-my $PACKET_TRACE_WINDOW=7200;
-my $THROUGHPUT_RRANGE=20000;
-my $THROUGHPUT_WINDOW=14400;
-my $THROUGHPUT_SUBINTERVALS_RRANGE=20000;
-my $THROUGHPUT_SUBINTERVALS_WINDOW=14400;
+$ENV{TZ}   = 'UTC';
 
-my $MESHES="$Bin/meshes";
-my $NODES="$Bin/nodes";
+# Read the config values
+my $conf_file = "$Bin/../conf/verify.conf";
+my %config = read_conf($conf_file);
+
+# Config variables
+my $DATA=$config{DATA};
+my $MESHES=$config{MESHES};
+my $NODES=$config{NODES};
+my $FAILURES_RRANGE=$config{FAILURES_RRANGE};
+my $FAILURES_WINDOW=$config{FAILURES_WINDOW};
+my $HISTOGRAM_OWDELAY_RRANGE=$config{HISTOGRAM_OWDELAY_RRANGE};
+my $HISTOGRAM_OWDELAY_WINDOW=$config{HISTOGRAM_OWDELAY_WINDOW};
+my $HISTOGRAM_TTL_RRANGE=$config{HISTOGRAM_TTL_RRANGE};
+my $HISTOGRAM_TTL_WINDOW=$config{HISTOGRAM_TTL_WINDOW};
+my $PACKET_COUNT_LOST_RRANGE=$config{PACKET_COUNT_LOST_RRANGE};
+my $PACKET_COUNT_LOST_WINDOW=$config{PACKET_COUNT_LOST_WINDOW};
+my $PACKET_COUNT_SENT_RRANGE=$config{PACKET_COUNT_SENT_RRANGE};
+my $PACKET_COUNT_SENT_WINDOW=$config{PACKET_COUNT_SENT_WINDOW};
+my $PACKET_LOSS_RATE_RRANGE=$config{PACKET_LOSS_RATE_RRANGE};
+my $PACKET_LOSS_RATE_WINDOW=$config{PACKET_LOSS_RATE_WINDOW};
+my $PACKET_RETRANSMITS_RRANGE=$config{PACKET_RETRANSMITS_RRANGE};
+my $PACKET_RETRANSMITS_WINDOW=$config{PACKET_RETRANSMITS_WINDOW};
+my $PACKET_RETRANSMITS_SUBINTERVALS_RRANGE=$config{PACKET_RETRANSMITS_SUBINTERVALS_RRANGE};
+my $PACKET_RETRANSMITS_SUBINTERVALS_WINDOW=$config{PACKET_RETRANSMITS_SUBINTERVALS_WINDOW};
+my $PACKET_TRACE_RRANGE=$config{PACKET_TRACE_RRANGE};
+my $PACKET_TRACE_WINDOW=$config{PACKET_TRACE_WINDOW};
+my $THROUGHPUT_RRANGE=$config{THROUGHPUT_RRANGE};
+my $THROUGHPUT_WINDOW=$config{THROUGHPUT_WINDOW};
+my $THROUGHPUT_SUBINTERVALS_RRANGE=$config{THROUGHPUT_SUBINTERVALS_RRANGE};
+my $THROUGHPUT_SUBINTERVALS_WINDOW=$config{THROUGHPUT_SUBINTERVALS_WINDOW};
+my $TIMEOUT=$config{TIMEOUT};
+my $VERBOSE=$config{VERBOSE};
+my $DELAY=$config{DELAY};
+
+$DATA = "$Bin/../$DATA"; # Convert to a full path
+
+
+my $VERSION = '1.3';
 
 my $date=undef;
 my $fh=undef;
@@ -81,11 +87,22 @@ GetOptions( \%opt,
             "start_date=s",  # start time with format: MM/DD/YY[YY][,hh[:mm:ss]]
             "end=i",         # UNIX end time
             "end_date=s",    # end time with format: MM/DD/YY[YY][,hh[:mm:ss]]
-            "out_central=s", # output file for central data
-            "out_remote=s",  # output file for remote data
+            "last=s",        # designates the last so many time units as the start time
+            "delay=i",       # return only records older than this many seconds
+            "outc=s",        # output file for central data
+            "outr=s",        # output file for remote data
             "update",        # force update of mesh-host information
-            "debug"
+            "debug",
+            "help"
            );
+
+if ( $opt{help} ) {
+    help();
+    exit(0);
+}
+
+# allow user override of delay
+$DELAY = $opt{delay} if ( $opt{delay} );
 
 my $ds = $opt{central} || 'psds1.grid.iu.edu';
 my $port = $opt{port} || 80;
@@ -100,8 +117,8 @@ if ( $display ne 'all' &&
 
 my $test_selection=undef;
 if ( !$opt{test} && !$opt{test_menu} ) {            # Redo logic to clean up
-    print "Specify a test (e.g., histogram-owdelay) with the --test option\n";
-    print "Or use --test_menu to see a list of available tests.\n";
+    print "Specify a test type (e.g., histogram-owdelay) with the --test option\n";
+    print "Or use --test_menu to see a list of available test types.\n";
     exit(0);
 } elsif ( $opt{test_menu}  ) {
     $test_selection = get_tests();
@@ -124,17 +141,19 @@ if ( !$opt{n} && !$opt{nodes} ) {
     exit(0);
 }
 
+
 # Update mesh data if missing or requested
-if ( !(-f "$MESHES") || $opt{update} ) {
+if ( !(-f "$DATA/$MESHES") || $opt{update} ) {
     $date = gmtime();
-    print "[$date] Updating mesh and node information. This may take 2 minutes...\n";
-    open($fh, '>', "$MESHES");
+    print "[$date] Updating mesh and node information. This may take several minutes...\n";
+    open($fh, '>', "$DATA/$MESHES");
     `$Bin/update_meshes`;
     `$Bin/update_nodes`;
+    print "[$date] Updated mesh and node information. Continuing...\n";
 }
 
 my $output=undef;
-my $node_ip_ref = get_node_ips($NODES);
+my $node_ip_ref = get_node_ips("$DATA/$NODES");
 my %mesh_ips=();
 my $mesh_selection=undef;
 my %mesh_menu=();
@@ -145,10 +164,8 @@ if ( $opt{mesh_menu} ) {
     $mesh_selection = $opt{mesh};
 }
 
-# Preset values
-$ENV{TZ}   = 'UTC';
 
-our $terminator= "$VERIFY_HOME/bin/terminator"; # script to kill a given process on timeout
+our $terminator= "$Bin/terminator"; # script to kill a given process on timeout
 
 my $timeout = 0;
 my $rrange=undef;
@@ -191,6 +208,7 @@ if ( $test_selection eq 'failures' ) {                                          
 my $now   = time();
 my $start = undef;
 my $end   = undef;
+my $last  = undef;
 my $start_date=undef;
 my $end_date=undef;
 if ( $opt{start} && $opt{end} ) {
@@ -199,9 +217,14 @@ if ( $opt{start} && $opt{end} ) {
 } elsif ( $opt{start_date} && $opt{end_date}  ) {
     $start = date2sec($opt{start_date});
     $end   = date2sec($opt{end_date});
+} elsif ( $opt{last} ) {
+    $last = $opt{last};
+    $last = lc( $last );
+    $end  = $now - $DELAY;
+    $start = get_start_secs( $last,$end );
 } else {   # select "random" start time
-    $end   = $now;
-    $start = set_start_time($rrange,$window);
+    $end   = $now - $DELAY;
+    $start = set_start_time($rrange,$window,$end);
 }
 
 
@@ -362,8 +385,8 @@ foreach my $node (@{$test_nodes_ref}) {
         $output .= "    Cause: $remote[0]\n\n";
     } else {
         #print "\nRemote node $node rejected.\n";
-        #print "\nRemote node $node rejected.\n";
-        $output .= "    Cause: $remote[0]\n\n";
+        #print "    Cause: $remote[0]\n\n";
+        $output .= "\nRemote node $node rejected.\n";
         $output .= "    Cause: $remote[0]\n\n";
     }
 }
@@ -381,14 +404,14 @@ my $all_remote_size = scalar @all_remote;
 #print "\nComparing $all_central_size records from the central store to $all_remote_size records from perfSONAR hosts\n";
 $output .= "\nComparing $all_central_size records from the central store to $all_remote_size records from perfSONAR hosts\n";
 
-if ( $opt{out_central} && $opt{out_remote} ) {
+if ( $opt{outc} && $opt{outr} ) {
     my $fh;
-    open($fh, '>', "./$opt{out_central}");
+    open($fh, '>', "$opt{outc}");
     foreach my $rec (@all_central) {
         print $fh "$rec\n";
     }
     close $fh;
-    open($fh, '>', "./$opt{out_remote}");
+    open($fh, '>', "$opt{outr}");
     foreach my $rec (@all_remote) {
         print $fh "$rec\n";
     }
@@ -402,94 +425,39 @@ threewaycompare(\@all_central,\@all_remote,$display);
 end();
 
 
-#print "__________________\n";
-#print "__________________\n";
-#print "__________________\n";
 gen_links(\$output,$test_selection,$ds,$port);
 
 
 # ---
 
 
-sub gen_links {
-    my ($str_ref,$test_selection,$ds,$port) = @_;
+sub read_conf {
+    my $conf_file = shift;
 
-    my @f    = ();
-    my $time = undef;
-    my $mon  = undef;
-    my $mk   = undef;
-    my $uri  = undef;
-    my $encoded_mon = undef;
-    my $cmk  = undef;
-    my $central = $ds . ':' . $port;
-
-    my @lines = split('\n', $$str_ref);
-    my $line=undef;
-
-    while ( scalar (@lines) > 0 ) {
-        $line = shift @lines;
-        #print "$line\n";
-        if ( $line =~ m/Started/ ) {
-            print "_" x120;
-            print "\n\n$line\n";
-        }
-        if ( $line =~ m/verify/ ) {
-            print "\n$line\n";
-            while ( scalar (@lines) > 0 ) {
-                $line = shift @lines;
-                if ( $line =~ m/rejected/ ) {
-                    print "\n$line\n";
-                    $line = shift @lines;
-                    print "$line\n";
-                }
-                if ( $line =~ m/Comparing/ ) {
-                    my $past_Validation = 0;
-                    print "\n$line\n";
-                    while ( scalar (@lines) > 0 ) {
-                        $line = shift @lines;
-                        if ( $line !~ m/Ended script/ ) {
-                            $past_Validation = 1 if ( $line =~ m/Validation/ );
-                            print "$line\n" if ( $line !~ m/^c:/ && $line !~ m/^r:/ );
-                            if ( $line =~ m/^r:/ ) {
-                                @f = split(' ', $line);
-                                @f = split(',', $f[1]);
-                                $time = $f[0];
-                                $mon = $f[2];
-                                $encoded_mon = uri_escape($mon);
-                                $mk = $f[5];
-                                chop $mk;        # remove ending colon
-                                $uri="http://$encoded_mon/esmond/perfsonar/archive/$mk/$test_selection/base\?time-start=$time\&time-end=$time\&format=json";
-                                print "$uri\n";
-                                print "\n" if ( !$past_Validation );
-                            }
-                            if ( $line =~ m/^c:/ ) {
-                                @f = split(' ', $line);
-                                $cmk = $f[3];
-                                @f = split(',', $f[1]);
-                                $time = $f[0];
-                                $mon = $f[2];
-                                $encoded_mon = uri_escape($mon);
-                                $uri="http://$central/esmond/perfsonar/archive/$cmk/$test_selection/base\?time-start=$time\&time-end=$time\&format=json";
-                                print "$uri\n";
-                            }
-                        } else {
-                            print "$line\n";
-                            last;
-                        }
-                    }
-                  last if ( $line =~ m/Ended script/ );
-                }
-            }
+    my $ch=undef;
+    my %config=();
+    open( $ch, '<', $conf_file ) or die "Could not open configuration file '$conf_file'.\n";
+    while (<$ch>) {
+        next if ( $_ =~ m/^#/ );
+        chomp $_;
+        if ( $_ =~ m/=/ ) {
+            my ($param,$value) = split('=', $_);
+            my $junk;
+            ($value,$junk) = split('#', $value); # ignore inline comments
+            $param =~ s/^\s+|\s+$//g;            # do left/right space trim
+            $value =~ s/^\s+|\s+$//g;
+            $config{$param} = $value;
         }
     }
+    close $ch;
+    return %config;
 }
 
 
-# execute a function call, but abort it if it takes too long to complete
-# if a signal other than the default ALRM is given, assume that the function being called uses
-# ALRMitself and use the given signal instead; for this case, we fork a child to give us the alternate
-# signal at the time of the timeout
-
+# Execute a function call, but abort it if it takes too long to complete. If a
+# signal other than the default ALRM is given, assume that the function being
+# called uses ALRM itself and use the given signal insteadr. In this case, fork
+# a child process to give the alternate signal when the timeout occurs.
 sub call_with_timeout {
     my($desc,$fn,$args,$timeout,$verbose,$sigtouse)= @_;
     return undef unless defined($fn);
@@ -570,11 +538,41 @@ sub end {
 }
 
 
+sub get_start_secs {
+   my ($start,$end) = @_;
+
+   my $num;
+
+   # start is in the form of nw, nd, nh, nm, or ns where n stands for a
+   # number, and w = weeks, d = days, h = hours, m = minutes and s = secs.
+   if ( $start =~ m/(\d+) w/x ) {
+      $num = $1;
+      $num = $num * 7 * 24 * 3600;
+   } elsif ( $start =~ m/(\d+) d/x ) {
+      $num = $1;
+      $num = $num * 24 * 3600;
+   } elsif ( $start =~ m/(\d+) h/x ) {
+      $num = $1;
+      $num = $num * 3600;
+   } elsif ( $start =~ m/(\d+) m/x ) {
+      $num = $1;
+      $num = $num * 60;
+   } elsif ( $start =~ m/(\d+) s/x ) {
+      $num = $1;
+   } else {
+      print "Bad entry: $start\n";
+      exit(0);
+   }
+
+   return $end - $num;
+}
+
+
 sub set_start_time {
-    my ($range, $offset) = @_;
+    my ($range, $offset, $end) = @_;
 
     my $rand  = int( rand($range));
-    my $start = $now - $rand - $offset;
+    my $start = $end - $rand - $offset;
 
     return $start;
 }
@@ -589,8 +587,7 @@ sub get_nodes {
 
     # Define filters
     my $filters = new perfSONAR_PS::Client::Esmond::ApiFilters();
-    $filters->time_range(3600*$opt{last}) if ( $opt{last} );
-    $filters->time_start($opt{start}) if ( $opt{start} );
+    $filters->time_start($start) if ( $start );
     $filters->event_type("$test");
 
     # Connect to api
@@ -634,7 +631,7 @@ sub get_nodes {
 }
 
 
-# gd logic changes with MA. Must clean up logic
+# gd logic changes with test type. Must clean up logic
 sub gd {
     my ($list) = @_;
 
@@ -710,9 +707,10 @@ sub gd {
             print "[$date] Get data\n" if ( $opt{debug} );
             if ( $test eq 'failures' ) {                               # failures
                 foreach my $d ( @{$data} ) {
+                    my $error_str = $d->val->{error};                  # error may contain new-line; chomp it
+                    chomp $error_str;
                     my $rec = $d->ts . "," . $d->datetime . ",$mon_ip,$src_ip,$dst_ip," .
-                              "'" . $d->val->{error} . "'" .
-                              ",$mk,$omk";
+                              "'$error_str',$mk,$omk";
                     push @results, $rec;
                     print "$rec\n" if ( $opt{debug} );
                     if ( $mon ne $datastore ) {  # Central
@@ -770,7 +768,7 @@ sub gd {
                     }
                 }
             } elsif ( $test eq 'packet-trace' ) {                      # packet-trace
-# Add error checking
+                ### TODO: Add error checking
                 foreach my $d ( @{$data} ) {
                     foreach my $hop ( @{$d->val} ) {
                         my $error_message = '';
@@ -799,7 +797,7 @@ sub gd {
                 }
             } elsif ( $test eq 'packet-retransmits-subintervals' ||
                       $test eq 'throughput-subintervals' ) {          # subinterval data
-# Add error checking
+                ### TODO: Add error checking
                 foreach my $d ( @{$data} ) {
                     foreach my $subint(@{$d->val}){
                         my $rec = $d->ts . "," . $d->datetime . ",$mon_ip,$src_ip,$dst_ip," .
@@ -1051,12 +1049,12 @@ sub get_nodes_by_mesh {
     my %mm = ();
 
     # Obtain the mesh-node list
-    if ( !(-f "$MESHES") ) { # Update immediately if file not found
-        open($fh, '>', "$MESHES");
+    if ( !(-f "$DATA/$MESHES") ) { # Update immediately if file not found
+        open($fh, '>', "$DATA/$MESHES");
         `$Bin/update_meshes`;
         `$Bin/update_nodes`;
     }
-    my $json = `cat $MESHES`;
+    my $json = `cat $DATA/$MESHES`;
     my $pd = decode_json($json);
     foreach my $mesh_key (sort keys %{$pd}) {
         my @nodes=();
@@ -1147,7 +1145,7 @@ sub get_mesh_nodes {
     # Ensure the number of selected nodes <= total nodes
     $desired_total_nodes = $total_nodes if ( $desired_total_nodes > $total_nodes );
 
-    # A list of nodes was not (fully) provided
+    # If a list of nodes was not (fully) provided, add more
     my %taken=();
     while ( scalar @test_nodes < $desired_total_nodes ) {
         my $choice = (keys %mon)[rand keys %mon];
@@ -1169,7 +1167,7 @@ sub get_node_ips {
 
     my %node_ip=();
     my $fh;
-    open( $fh, "<$file_name" );
+    open( $fh, '<', $file_name ) or die "Could not open the nodes file '$file_name'.\n";
 
     while( <$fh> ) {
         chomp $_;
@@ -1178,4 +1176,165 @@ sub get_node_ips {
     }
 
     return \%node_ip;
+}
+
+
+
+sub gen_links {
+    my ($str_ref,$test_selection,$ds,$port) = @_;
+
+    my @f    = ();
+    my $time = undef;
+    my $mon  = undef;
+    my $mk   = undef;
+    my $uri  = undef;
+    my $cmk  = undef;
+    my $encoded_mon = undef;
+    my $central = $ds . ':' . $port;
+
+    my @lines = split('\n', $$str_ref);
+    my $line=undef;
+
+    while ( scalar (@lines) > 0 ) {
+        $line = shift @lines;
+        #print "$line\n";
+        if ( $line =~ m/Started/ ) {
+            print "_" x120;
+            print "\n\n$line\n";
+            $line = shift @lines;
+            print "$line\n";
+            $line = shift @lines;
+            print "$line\n";
+            $line = shift @lines;
+            print "$line\n";
+            $line = shift @lines;
+            print "$line\n";
+            $line = shift @lines;
+            print "$line\n";
+        }
+        if ( $line =~ m/verify/ ) {
+            print "\n$line\n";
+            while ( scalar (@lines) > 0 ) {
+                $line = shift @lines;
+                if ( $line =~ m/rejected/ ) {
+                    print "\n$line\n";
+                    $line = shift @lines;
+                    print "$line\n";
+                }
+                if ( $line =~ m/Comparing/ ) {
+                    my $past_Validation = 0;
+                    print "\n$line\n";
+                    while ( scalar (@lines) > 0 ) {
+                        $line = shift @lines;
+                        if ( $line !~ m/Ended script/ ) {
+                            $past_Validation = 1 if ( $line =~ m/Validation/ );
+                            print "$line\n" if ( $line !~ m/^c:/ && $line !~ m/^r:/ );
+                            if ( $line =~ m/^r:/ ) {
+                                @f = split(' ', $line);
+                                @f = split(',', $f[1]);
+                                $time = $f[0];
+                                $mon = $f[2];
+                                $encoded_mon = uri_escape($mon);
+                                $mk = $f[5];
+                                chop $mk;        # remove ending colon
+                                $uri="http://$encoded_mon/esmond/perfsonar/archive/$mk/$test_selection/base\?time-start=$time\&time-end=$time\&format=json";
+                                print "$uri\n";
+                                print "\n" if ( !$past_Validation );
+                            }
+                            if ( $line =~ m/^c:/ ) {
+                                @f = split(' ', $line);
+                                $cmk = $f[3];
+                                @f = split(',', $f[1]);
+                                $time = $f[0];
+                                $mon = $f[2];
+                                $encoded_mon = uri_escape($mon);
+                                $uri="http://$central/esmond/perfsonar/archive/$cmk/$test_selection/base\?time-start=$time\&time-end=$time\&format=json";
+                                print "$uri\n";
+                            }
+                        } else {
+                            print "$line\n";
+                            last;
+                        }
+                    }
+                  last if ( $line =~ m/Ended script/ );
+                }
+            }
+        }
+    }
+}
+
+
+sub help {
+    print <<EOF;
+
+    Verify is a Perl script that compares perfSONAR data in remote perfSONAR hosts to the same data collected in
+    centralized data stores. Its purpose is to confirm that the data centralization process is complete and accurate.
+
+    Comparisons Performed
+    1) Alteration - This checks for items in both the central store and the remote perfSONAR hosts where values differ.
+    2) Validation - This checks for items in the central store that are not in the remote perfSONAR hosts.
+    3) Coverage - This checks for items in the remote perfSONAR hosts that are not in the central store.
+
+    Typically, the script will be executed from cron, specifying a central repository to test with, a mesh and/or test
+    type to use, and the number of perfSONAR hosts to include in the test. The script will select the hosts, start, and
+    end times at "random", perform the tests, and return results. It is also possible to specify the perfSONAR hosts to test
+    against, along with start and end times. This is helpful when interested in repeating the same test.
+
+    Options
+    --central    - String. The host name or IP address of the central repository
+    --mesh       - String. The mesh to use
+    --mesh_menu  - Integer. Allows selection of a mesh from a list. Helpful when the mesh name is not known.
+    --test       - String. The test type to select. Available types are:
+                   failures, histogram-owdelay, histogram-ttl, packet-count-lost, packet-count-sent, packet-loss-rate,
+                   packet-retransmits, packet-retransmits-subintervals, packet-trace, throughput, throughput-subinterval
+    --test_menu  - Integer. Allows selection of a test type from a list. Helpful when the test name is not known.
+    --n          - Integer. The number of perfSONAR nodes to select for testing. Ignored when --nodes is used.
+    --nodes      - Optional. A comma-separated list of perfSONAR host names or IP addresses to test with
+                   (if specific nodes are desired)
+    --start      - Optional integer. Select records with a UTC epoch seconds time stamp >= this value
+    --end        - Optional integer. Select records with a UTC epoch seconds time stamp <= this value
+    --start_date - Optional. Like start but uses a UTC date string with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]
+    --end_date   - Optional. Like end but uses a UTC date string with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]
+    --last       - Optional. Designates the last so many time units as the start time. End time is "now".
+                   Possible values are in the form of nw, nd, nh, nm, or ns, where n is a positive integer and
+                   w = weeks, d = days, h = hours, m = minutes, s = secs.
+    --delay      - Optional. Skip records with time stamps more recent than this many seconds ago. Default value is
+                   stored in the conf file. This gives time for the central store to sync up with remote stores and
+                   reduce false positives. It is ignored when start/end parameters are specified. It is referenced
+                   otherwise.
+    --display    - Optional string. Select test results to display. Default action is to show all tests
+                   (either by not using it or with --display all)
+                   --display validate => show alteration and validation
+                   --display coverage => show alteration and coverage
+    --outc       - Optional path and file name. Outputs data collected from the central store to the given file.
+    --outr       - Optional path and file name. Outputs data collected from the remote hosts to the given file.
+    --update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.
+                   This option forces an update to occur prior to running verify. Note: The update may take a few minutes to
+                   complete and is meant to be used sparingly.
+    --help       - Displays this information
+
+    Sample Usage
+    - Compare pack-count-sent data between the central store (psds1.grid.iu.edu) and two script-selected perfSONAR hosts
+      that collect pack-count-sent data for a script-selected time range
+      $Script --central psds1.grid.iu.edu --test packet-count-sent --n 2
+
+    - Compare packet-loss-rate data between the central data store and one script-selected host, returning only alteration
+      and validation differences; i.e., ignoring coverage test results
+      $Script --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display validate
+
+    - Compare packet-count-sent data from the central repository, using port 9090, with data from two specified hosts for
+      the specified time range
+      $Script --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent \
+             --nodes sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
+
+    - Request a comparison with specific perfSONAR hosts in a given mesh for a specified time range
+      $Script --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals \
+             --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 07/02/2015,05:29:28 --end_date 07/02/2015,10:52:01 --display all
+
+    - Allow user to select a test type and mesh from option lists
+      $Script --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2
+
+    $Script version $VERSION
+
+EOF
 }
