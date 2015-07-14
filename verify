@@ -65,7 +65,7 @@ my $DELAY=$config{DELAY};
 $DATA = "$Bin/../$DATA"; # Convert to a full path
 
 
-my $VERSION = '1.3';
+my $VERSION = '1.4';
 
 my $date=undef;
 my $fh=undef;
@@ -89,8 +89,7 @@ GetOptions( \%opt,
             "end_date=s",    # end time with format: MM/DD/YY[YY][,hh[:mm:ss]]
             "last=s",        # designates the last so many time units as the start time
             "delay=i",       # return only records older than this many seconds
-            "outc=s",        # output file for central data
-            "outr=s",        # output file for remote data
+            "out=s",         # output raw data. See help.
             "update",        # force update of mesh-host information
             "debug",
             "help"
@@ -229,15 +228,6 @@ if ( $opt{start} && $opt{end} ) {
 
 
 my $logtime = gmtime();
-#print "\n\n__________________________________________________________\n\n";
-#print "Started script at:   $logtime UTC\n";
-
-#print "\nInitiating a sample comparison between $test_selection archives in the\n";
-#print "Esmond data store ($ds:$port) and remote perfSONAR nodes.\n";
-#print "Selected UTC start time: " . sec2date( $start ) . " (UNIX time: $start)\n";
-#print "Selected UTC end   time: " . sec2date( $end ) . " (UNIX time: $end)\n";
-#print "Selected mesh: $mesh_selection\n" if ( $mesh_selection );
-
 $output  = "\n\n__________________________________________________________\n\n";
 $output .= "Started script at:   $logtime UTC\n";
 $output .= "\nInitiating a sample comparison between $test_selection archives in the\n";
@@ -258,11 +248,9 @@ my $test_ip_ref = undef;
 
 if ( $mesh_selection ) {                         # Note: nodes not in the selected mesh are ignored
    ($node_counts,$test_nodes_ref,$test_ip_ref) = get_mesh_nodes($mesh_ref,$opt{test},$mesh_selection,$opt{n},$opt{nodes},$start,$end);
-    #print "$node_counts\n";
     $output .= "$node_counts\n";
     $total_nodes = scalar (@{$test_nodes_ref});
     foreach my $node (@{$test_nodes_ref}) {
-        #print "$node (" . $$test_ip_ref{$node} . ")\n";
         $output .= "$node (" . $$test_ip_ref{$node} . ")\n";
     }
     $node_list = join( ',', @{$test_nodes_ref} );
@@ -272,14 +260,11 @@ if ( $mesh_selection ) {                         # Note: nodes not in the select
     $node_list = $opt{nodes};
     $test_nodes_ref = \@test_nodes;
 } else {
-    #print "\n[$date] Obtaining list of nodes to test from Esmond central data store...\n";
     $output .= "\n[$date] Obtaining list of nodes to test from Esmond central data store...\n";
     ($node_counts,$test_nodes_ref,$test_ip_ref) = get_nodes($opt{test},$opt{n},$start,$end);
-    #print "$node_counts\n";
     $output .= "$node_counts\n";
     $total_nodes = scalar (@{$test_nodes_ref});
     foreach my $node (@{$test_nodes_ref}) {
-        #print "$node (" . $$test_ip_ref{$node} . ")\n";
         $output .= "$node (" . $$test_ip_ref{$node} . ")\n";
     }
     $node_list = join( ',', @{$test_nodes_ref} );
@@ -287,18 +272,14 @@ if ( $mesh_selection ) {                         # Note: nodes not in the select
 
 
 
-#print "\nExecuting:\n";
 $output .= "\nExecuting:\n";
 if ( $opt{mesh_menu} || $opt{mesh} ) {
-    #print "./verify --central $ds --port $port --mesh '$mesh_selection' --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
     $output .= "./verify --central $ds --port $port --mesh '$mesh_selection' --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
 } else {
-    #print "./verify --central $ds --port $port --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
     $output .= "./verify --central $ds --port $port --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
 }
 
 $date = gmtime();
-#print "\n[$date] Obtaining data from Esmond central data store...\n";
 $output .= "\n[$date] Obtaining data from Esmond central data store...\n";
 my %central_nodes=();
 my @central=();
@@ -315,21 +296,15 @@ foreach my $node (@{$test_nodes_ref}) {
        push @args, $port;
     ($res,@central) = call_with_timeout('Central',\&gd,\@args,$TIMEOUT,$VERBOSE,'USR2');
     if ( !defined $central[0] ) {
-        #print "Node $node rejected. Cause:\n";
-        #print "    No data in central store.\n";
         $output .= "Node $node rejected. Cause:\n";
         $output .= "    No data in central store.\n";
     } elsif ( $central[0] !~ m/Error/  && $res == 1 ) {  # node accepted for comparison
         push @{ $central_nodes{$node} }, @central;
     } elsif ( $res == 1 ) {
-        #print "Data in central store for $node rejected.\n";
-        #print "    Cause: $central[0]\n";
         $output .= "Data in central store for $node rejected.\n";
         $output .= "    Cause: $central[0]\n";
         $timeout = 0;
     } else {
-        #print "Data from central store unavailable. No comparisons possible at this time.\n";
-        #print "    Cause: $central[0]\n";
         $output .= "Data from central store unavailable. No comparisons possible at this time.\n";
         $output .= "    Cause: $central[0]\n";
         end();
@@ -339,16 +314,12 @@ foreach my $node (@{$test_nodes_ref}) {
 
 my $count = keys %central_nodes;
 if ( $count == 0 ) {
-    #print "Data from central store unavailable. No comparisons possible at this time.\n";
-    #print "    Cause: Data gathering timed out\n";
     $output .= "Data from central store unavailable. No comparisons possible at this time.\n";
     $output .= "    Cause: Data gathering timed out\n";
     end();
     exit(0);
 }
 
-#print "\n\n__________\n\n";
-#print "Obtaining data directly from perfSONAR nodes...\n";
 $output .= "\n\n__________\n\n";
 $output .= "Obtaining data directly from perfSONAR nodes...\n";
 my %accepted_nodes=();
@@ -369,23 +340,16 @@ foreach my $node (@{$test_nodes_ref}) {
 
     # Exclude from comparison nodes that are unreachable or have timed out
     if ( !defined $remote[0] ) {
-        #print "Remote node $node rejected. Cause:\n";
-        #print "    No data available.\n";
         $output .= "Remote node $node rejected. Cause:\n";
         $output .= "    No data available.\n";
     } elsif ( $remote[0] !~ m/Error/ && $res == 1 ) {
-        #print "\nRemote node $node accepted\n\n";
         $output .= "\nRemote node $node accepted\n\n";
         $accepted_nodes{$node} = 1;
         push @{ $remote_nodes{$node} }, @remote;
     } elsif ( $res == 0 ) {
-        #print "\nRemote node $node rejected.\n";
-        #print "    Cause: $remote[0]\n\n";
         $output .= "\nRemote node $node rejected.\n";
         $output .= "    Cause: $remote[0]\n\n";
     } else {
-        #print "\nRemote node $node rejected.\n";
-        #print "    Cause: $remote[0]\n\n";
         $output .= "\nRemote node $node rejected.\n";
         $output .= "    Cause: $remote[0]\n\n";
     }
@@ -401,26 +365,26 @@ foreach my $node (keys %accepted_nodes) {
 
 my $all_central_size = scalar @all_central;
 my $all_remote_size = scalar @all_remote;
-#print "\nComparing $all_central_size records from the central store to $all_remote_size records from perfSONAR hosts\n";
 $output .= "\nComparing $all_central_size records from the central store to $all_remote_size records from perfSONAR hosts\n";
 
-if ( $opt{outc} && $opt{outr} ) {
+if ( $opt{out} ) {
     my $fh;
-    open($fh, '>', "$opt{outc}");
+    my $file_name = $opt{out} . '-' . $now . '.central';
+    open($fh, '>', "$file_name");
     foreach my $rec (@all_central) {
         print $fh "$rec\n";
     }
     close $fh;
-    open($fh, '>', "$opt{outr}");
+    $file_name = $opt{out} . '-' . $now . '.remote';
+    open($fh, '>', "$file_name");
     foreach my $rec (@all_remote) {
         print $fh "$rec\n";
     }
     close $fh;
 }
 
-#print "checking for discrepancies...\n";
 $output .= "checking for discrepancies...\n";
-threewaycompare(\@all_central,\@all_remote,$display);
+threewaycompare(\@all_central,\@all_remote,$display,$opt{out});
 
 end();
 
@@ -464,7 +428,6 @@ sub call_with_timeout {
     $timeout= 60 unless defined $timeout;
     $verbose= 1 unless defined $verbose;
     $sigtouse= 'ALRM' unless defined $sigtouse;
-    #print "---\n";
     $output .= "---\n";
     print "call_with_timeout(",join(',',$desc,$fn,'['.join(',',@{$args}).']',$timeout,$verbose,$sigtouse),")\n" if $verbose > 3;
 
@@ -475,7 +438,7 @@ sub call_with_timeout {
     eval {
         my $sighandler= sub {0 && print "$$: in signal handler for $_[0]\n";
                              $output .= "$$: $desc timed out with $_[0] after $timeout seconds";
-                             die "$$: $desc timed out with $_[0] after $timeout seconds" };         # Maybe should die silently
+                             die "$$: $desc timed out with $_[0] after $timeout seconds" };   # should it die silently?
         $SIG{$sigtouse}= $sighandler;
         if ($sigtouse eq 'ALRM') {
             alarm($timeout);
@@ -491,18 +454,14 @@ sub call_with_timeout {
         # Parent process
         # on timeout, alarm handler above will execute and we'll fall out of this eval
         # on normal exit, we'll fall out of the bottom of the eval with no error
-        #print "$desc: starting call\n" if $verbose > 1;
-        #print "&{$fn}(" . join(',',@{$args}) . ")\n" if $verbose > 1;
         $output .= "$desc: starting call\n" if $verbose > 1;
         $output .= "&{$fn}(" . join(',',@{$args}) . ")\n" if $verbose > 1;
         @res = &{$fn}(join(',',@{$args}));  # Call the function
-        #print "$desc exited normally: ",join(',',@res),"\n" if $verbose > 4;
         $output .= "$desc exited normally: " . join(',',@res) . "\n" if $verbose > 4;
         $SIG{$sigtouse}= 'IGNORE';
         if ($sigtouse eq 'ALRM') {
             alarm(0);
         } else {
-            #print "Verify ($$) finished in time; canceling terminator ($timeoutpid)\n" if $verbose > 2;
             $output .= "Verify ($$) finished in time; canceling terminator ($timeoutpid)\n" if $verbose > 2;
             kill 'KILL', $timeoutpid;
         }
@@ -511,7 +470,6 @@ sub call_with_timeout {
     my $elapsed= time()-$start;
     if ($@) {
         if ($@ =~ /timed out with/) { # we timed out
-            #print "$@\n";
             $output .= "$@\n";
             return (0);
         } else { # the method call did a die
@@ -522,10 +480,9 @@ sub call_with_timeout {
             } else {
                 kill $timeoutpid;
             }
-            die;
+            die;   # should it die silently?
         }
     }
-    #print qq{$desc exited normally [elapsed=$elapsed]\n};
     $output .= qq{$desc exited normally [elapsed=$elapsed]\n};
     return (1,@res);
 }
@@ -533,7 +490,6 @@ sub call_with_timeout {
 
 sub end {
     $logtime = gmtime();
-    #print "Ended script at:   $logtime UTC\n";
     $output .= "Ended script at:   $logtime UTC\n";
 }
 
@@ -650,7 +606,6 @@ sub gd {
 
         # Connect to api
         $date = gmtime();
-        #print "[$date] Connect to api\n";
         $output .= "[$date] Connect to api\n";
         my $encoded_host = uri_escape($datastore);
 
@@ -667,7 +622,6 @@ sub gd {
 
         # Get measurements matching filters
         $date = gmtime();
-        #print "[$date] Get measurements matching filters for $mon\n";
         $output .= "[$date] Get measurements matching filters for $mon\n";
         my $pd;
         $pd = $clpath->get_metadata();
@@ -713,13 +667,13 @@ sub gd {
                               "'$error_str',$mk,$omk";
                     push @results, $rec;
                     print "$rec\n" if ( $opt{debug} );
-                    if ( $mon ne $datastore ) {  # Central
-                        print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                              $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                    } else {                     # Remote
-                        print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                              $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                    }
+                    #if ( $mon ne $datastore ) {  # Central
+                    #    print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                    #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                    #} else {                     # Remote
+                    #    print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                    #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                    #}
                 }
             } elsif ( $test eq 'throughput' ||                         # throughput
                       $test eq 'packet-count-sent' ||                  # packet counts
@@ -732,13 +686,13 @@ sub gd {
                               ",$mk,$omk";
                     push @results, $rec;
                     print "$rec\n" if ( $opt{debug} );
-                    if ( $mon ne $datastore ) {  # Central
-                        print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                              $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                    } else {                     # Remote
-                        print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                              $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                    }
+                    #if ( $mon ne $datastore ) {  # Central
+                    #    print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                    #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                    #} else {                     # Remote
+                    #    print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                    #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                    #}
                 }
             } elsif ( $test eq 'histogram-owdelay'  ||
                       $test eq 'histogram-ttl' ) {                     # histogram data
@@ -759,13 +713,13 @@ sub gd {
                               ",$mk,$omk";
                     push @results, $rec;
                     print "$rec\n" if ( $opt{debug} );
-                    if ( $mon ne $datastore ) {  # Central
-                        print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                              $stats_d->ts . "\&time-end=" . $stats_d->ts . "\&format=json\n" if ( $opt{debug} );
-                    } else {                     # Remote
-                        print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                              $stats_d->ts . "\&time-end=" . $stats_d->ts . "\&format=json\n" if ( $opt{debug} );
-                    }
+                    #if ( $mon ne $datastore ) {  # Central
+                    #    print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                    #          $stats_d->ts . "\&time-end=" . $stats_d->ts . "\&format=json\n" if ( $opt{debug} );
+                    #} else {                     # Remote
+                    #    print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                    #          $stats_d->ts . "\&time-end=" . $stats_d->ts . "\&format=json\n" if ( $opt{debug} );
+                    #}
                 }
             } elsif ( $test eq 'packet-trace' ) {                      # packet-trace
                 ### TODO: Add error checking
@@ -786,13 +740,13 @@ sub gd {
                                   ",$mk,$omk";
                         push @results, $rec;
                         print "$rec\n" if ( $opt{debug} );
-                        if ( $mon ne $datastore ) {  # Central
-                            print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                                  $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                        } else {                     # Remote
-                            print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                                  $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                        }
+                        #if ( $mon ne $datastore ) {  # Central
+                        #    print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                        #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                        #} else {                     # Remote
+                        #    print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                        #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                        #}
                     }
                 }
             } elsif ( $test eq 'packet-retransmits-subintervals' ||
@@ -800,18 +754,22 @@ sub gd {
                 ### TODO: Add error checking
                 foreach my $d ( @{$data} ) {
                     foreach my $subint(@{$d->val}){
+                        # Many in packet-retransmits-subintervals are NULL.
+                        # To quiet warnings, set undefined values to ''.
+                        # See https://github.com/perfsonar/regular-testing/issues/8
+                        $subint->{val} = '' if ( !defined $subint->{val} );
                         my $rec = $d->ts . "," . $d->datetime . ",$mon_ip,$src_ip,$dst_ip," .
                                   "'" .$subint->{start} . ";" . $subint->{duration} . ";" . $subint->{val} . "'" .
                                   ",$mk,$omk";
                         push @results, $rec;
                         print "$rec\n" if ( $opt{debug} );
-                        if ( $mon ne $datastore ) {  # Central
-                            print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                                  $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                        } else {                     # Remote
-                            print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
-                                  $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
-                        }
+                        #if ( $mon ne $datastore ) {  # Central
+                        #    print "http:\/\/$encoded_host:$port\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                        #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                        #} else {                     # Remote
+                        #    print "http:\/\/$mon\/esmond\/perfsonar\/archive\/$mk\/$test\/base\?time-start=" .
+                        #          $d->ts . "\&time-end=" . $d->ts . "\&format=json\n" if ( $opt{debug} );
+                        #}
                     }
                 }
             }
@@ -822,7 +780,7 @@ sub gd {
 
 
 sub threewaycompare {
-    my ($cref,$rref,$display) = @_;
+    my ($cref,$rref,$display,$prefix) = @_;
 
     my %set1=();             # hash lookup table for $set1
     my %set2=();             # hash lookup table for $set2
@@ -834,6 +792,13 @@ sub threewaycompare {
 
     my @fields=();
     my $item;
+
+    my $file_name=undef;
+    my $dh=undef;
+    if ( defined $prefix ) {
+        $file_name = $prefix . '-' . $now . '.diff';
+        open($dh, '>', "$file_name");
+    }
 
     # Sample record
     # time       time                meas. agent  src        dst          val        mk                               omk
@@ -882,46 +847,46 @@ sub threewaycompare {
 
     # Display any discrepancies found
 
-    #print "\n\nAlteration - Items in both the central store and the remote perfSONAR hosts where measures differ:\n";
+    print $dh "\n\nAlteration - Items in both the central store and the remote perfSONAR hosts where measures differ:\n" if ( defined $dh );
     $output .= "\n\nAlteration - Items in both the central store and the remote perfSONAR hosts where measures differ:\n";
     if (!@diff_count) {
-        #print "          -- NONE --\n";
+        print $dh "          -- NONE --\n" if ( defined $dh );
         $output .= "          -- NONE --\n";
     } else {
         @diff_count = sort by_key @diff_count;
         foreach my $key (@diff_count) {
-            #print "c: $key: $set1{$key} $cmkey{$key}\n";
-            #print "r: $key: $set2{$key}\n\n";
+            print $dh "c: $key: $set1{$key} $cmkey{$key}\n" if ( defined $dh );
+            print $dh "r: $key: $set2{$key}\n\n" if ( defined $dh );
             $output .= "c: $key: $set1{$key} $cmkey{$key}\n";
             $output .= "r: $key: $set2{$key}\n\n";
         }
     }
 
     if ( $display eq 'validate' || $display eq 'all' ) {
-        #print "\nValidation - Items in the central store not in the remote perfSONAR hosts:\n";
+        print $dh "\nValidation - Items in the central store not in the remote perfSONAR hosts:\n" if ( defined $dh );
         $output .= "\nValidation - Items in the central store not in the remote perfSONAR hosts:\n";
         if (!@not_in_set2) {
-            #print "          -- NONE --\n";
+            print $dh "          -- NONE --\n" if ( defined $dh );
             $output .= "          -- NONE --\n";
         } else {
             @not_in_set2 = sort by_key @not_in_set2;
             foreach my $key (@not_in_set2) {
-                #print "c: $key: $set1{$key} $cmkey{$key}\n";
+                print $dh "c: $key: $set1{$key} $cmkey{$key}\n" if ( defined $dh );
                 $output .= "c: $key: $set1{$key} $cmkey{$key}\n";
             }
         }
     }
 
     if ( $display eq 'cover' || $display eq 'all' ) {
-        #print "\nCoverage   - Items in the remote perfSONAR hosts not in the central store:\n";
+        print $dh "\nCoverage   - Items in the remote perfSONAR hosts not in the central store:\n" if ( defined $dh );
         $output .= "\nCoverage   - Items in the remote perfSONAR hosts not in the central store:\n";
         if (!@not_in_set1) {
-            #print "          -- NONE --\n";
+            print $dh "          -- NONE --\n" if ( defined $dh );
             $output .= "          -- NONE --\n";
         } else {
             @not_in_set1 = sort by_key @not_in_set1;
             foreach my $key (@not_in_set1) {
-                #print "r: $key: $set2{$key}\n";
+                print  $dh "r: $key: $set2{$key}\n" if ( defined $dh );
                 $output .= "r: $key: $set2{$key}\n";
             }
         }
@@ -1197,7 +1162,6 @@ sub gen_links {
 
     while ( scalar (@lines) > 0 ) {
         $line = shift @lines;
-        #print "$line\n";
         if ( $line =~ m/Started/ ) {
             print "_" x120;
             print "\n\n$line\n";
@@ -1306,8 +1270,9 @@ sub help {
                    (either by not using it or with --display all)
                    --display validate => show alteration and validation
                    --display coverage => show alteration and coverage
-    --outc       - Optional path and file name. Outputs data collected from the central store to the given file.
-    --outr       - Optional path and file name. Outputs data collected from the remote hosts to the given file.
+    --out        - Optional path and file name prefix. Outputs raw data to three different files. File names are of format
+                   "path/prefix-[timestamp].[source]", where timestamp refers to the UNIX time the script ran and source is
+                   "central" for the central store, "remote" for perfSONAR hosts, "diff" for their comparison.
     --update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.
                    This option forces an update to occur prior to running verify. Note: The update may take a few minutes to
                    complete and is meant to be used sparingly.
