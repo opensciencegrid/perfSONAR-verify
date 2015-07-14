@@ -35,8 +35,9 @@ Typically, the script will be executed from cron, specifying a central repositor
                (either by not using it or with --display all)
                --display validate => show alteration and validation
                --display coverage => show alteration and coverage
---outc       - Optional path and file name. Outputs data collected from the central store to the given file.
---outr       - Optional path and file name. Outputs data collected from the remote hosts to the given file.
+--out        - Optional path and file name prefix. Outputs raw data to three different files. File names are of format
+               "path/prefix-[timestamp].[source]", where timestamp refers to the UNIX time the script ran and source is
+               "central" for the central store, "remote" for perfSONAR hosts, "diff" for their comparison.
 --update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.
                This option forces an update to occur prior to running verify. Note: The update may take a few minutes to
                complete and is meant to be used sparingly.
