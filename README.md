@@ -11,6 +11,7 @@ Typically, the script will be executed from cron, specifying a central repositor
 #### Options
 ```
 --central    - String. The host name or IP address of the central repository  
+--port       - Optional integer. Port used to access the central repository. Default is 80. 
 --mesh       - String. The mesh to use  
 --mesh_menu  - Integer. Allows selection of a mesh from a list. Helpful when the mesh name is not known.
 --test       - String. The test type to select. Available types are:
