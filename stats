@@ -1,0 +1,97 @@
+#!/usr/bin/perl
+
+# This scripts provides some quick stats on data generated
+# by the validation script. It calls script 'sum' to total
+# the counts of interest in each validation output file.
+
+# Usage:
+# stats path datastore-name
+# where path to the log file is relative or absolute
+# and datastore-name is the name used by the validation
+# script to identify a central datastore.
+
+# Examples:
+# stats ../logs fermicloud
+# stats ../logs psds-itb2
+
+use strict;
+use warnings;
+
+if ( !defined $ARGV[1] ) {
+    print "\nUsage: stats path datastore-name\n";
+    print "where path to the log file is relative or absolute\n";
+    print "and datastore-name is the name used by the validation\n";
+    print "script to identify a central datastore.\n";
+
+    print "\nExamples:\n";
+    print "stats ../logs fermicloud\n";
+    print "stats ../logs psds-itb2\n";
+    print "\n";
+    exit;
+}
+
+my $store = $ARGV[1];
+my $path  = $ARGV[0];
+print "central store: $store\n\n";
+
+my $sums=undef;
+my @sums=undef;
+my $gtc=0;
+my $gtr=0;
+my $gta=0;
+my $gtv=0;
+my $gtg=0;
+my $pct_diff=undef;
+my $pctv=undef;
+my $pctg=undef;
+my %alt=();
+my %cov=();
+my %val=();
+
+my @tests = ('failures','histogram-owdelay','histogram-ttl',
+             'packet-count-lost','packet-count-sent','packet-loss-rate',
+             'packet-retransmits','packet-retransmits-subintervals',
+             'packet-trace','throughput','throughput-subintervals');
+
+foreach my $test (@tests) {
+    my $file = "$test" . '_' . $store . '_verify.log';
+    $sums = `./sum $path/$file`;
+    kaching($file,$sums);
+}
+
+$pct_diff  = ($gtr-$gtc)/$gtr*100;
+$pctv = $gtv/$gtc*100;
+$pctg = $gtg/$gtr*100;
+
+printf("central:   %8d \t remotes:    %8d \t %5.1f %% diff\n", $gtc,$gtr,$pct_diff);
+printf("central:   %8d \t validation: %8d \t %5.1f %%\n", $gtc,$gtv,$pctv);
+printf("remotes:   %8d \t coverage:   %8d \t %5.1f %%\n", $gtr,$gtg,$pctg);
+printf("alteration:%8d\n", $gta);
+print "\nsources of discrepancies\n\n";
+foreach my $key (sort {lc $a cmp lc $b} keys %alt) {
+    print "alteration found in: $key\n";
+}
+print "\n";
+foreach my $key (sort {lc $a cmp lc $b} keys %cov) {
+    print "  coverage found in: $key\n";
+}
+print "\n";
+foreach my $key (sort {lc $a cmp lc $b} keys %val) {
+    print "validation found in: $key\n";
+}
+
+
+sub kaching {
+    my ($file,$sums) = @_;
+
+    chomp $sums;
+    @sums = split(' ', $sums);
+    $gtc += $sums[3];    # central
+    $gtr += $sums[6];    # remote
+    $gta += $sums[8];    # alteration
+    $gtv += $sums[10];   # validation
+    $gtg += $sums[12];   # coverage
+    $alt{$file} = 1 if ( $sums[8] );
+    $cov{$file} = 1 if ( $sums[12] );
+    $val{$file} = 1 if ( $sums[10] );
+}
