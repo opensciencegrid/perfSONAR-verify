@@ -6,7 +6,7 @@
 
 # For more information, use the --help option or see the README.md file under
 # https://github.com/opensciencegrid/perfSONAR-verify/
-
+ 
 use strict;
 use warnings;
 
@@ -19,6 +19,7 @@ use URI::Escape;
 use JSON;
 use Carp;
 use Data::Dumper;
+use Text::ParseWords;
 
 use lib '/opt/perfsonar_ps/toolkit/lib/';
 use perfSONAR_PS::Client::Esmond::ApiFilters;
@@ -111,14 +112,14 @@ if ( $display ne 'all' &&
      $display ne 'validate' &&
      $display ne 'cover' ) {
     print "Specify for --display 'validate', 'cover', 'all', or exclude the option for all\n";
-    exit(0);
+    exit(1);
 }
 
 my $test_selection=undef;
-if ( !$opt{test} && !$opt{test_menu} ) {            # Redo logic to clean up
+if ( !$opt{test} && !$opt{test_menu} ) { # Clean up logic if there is time
     print "Specify a test type (e.g., histogram-owdelay) with the --test option\n";
     print "Or use --test_menu to see a list of available test types.\n";
-    exit(0);
+    exit(1);
 } elsif ( $opt{test_menu}  ) {
     $test_selection = get_tests();
 } elsif ( $opt{test} ne 'failures'                        &&
@@ -129,7 +130,7 @@ if ( !$opt{test} && !$opt{test_menu} ) {            # Redo logic to clean up
           $opt{test} ne 'throughput'                      && $opt{test} ne 'throughput-subintervals' ) {
     print "Test '$opt{test}' is not supported.\n";
     print "Use --test_menu to see a list of available tests.\n";
-    exit(0);
+    exit(1);
 } elsif ( $opt{test} ) {
     $test_selection = $opt{test};
 }
@@ -137,7 +138,7 @@ if ( !$opt{test} && !$opt{test_menu} ) {            # Redo logic to clean up
 if ( !$opt{n} && !$opt{nodes} ) {
     print "   Specify a number of perfSONAR hosts to check with the --n option.\n";
     print "   Otherwise, specify a comma-separated list of host names (or IP addresses) with the --nodes option.\n";
-    exit(0);
+    exit(1);
 }
 
 
@@ -151,10 +152,10 @@ if ( !(-f "$DATA/$MESHES") || $opt{update} ) {
     print "[$date] Updated mesh and node information. Continuing...\n";
 }
 
-my $output=undef;
+my $output=undef;          # the script's output buffer
 my $node_ip_ref = get_node_ips("$DATA/$NODES");
 my %mesh_ips=();
-my $mesh_selection=undef;
+my $mesh_selection=undef;  # the selected mesh name
 my %mesh_menu=();
 my $mesh_ref = get_nodes_by_mesh();
 if ( $opt{mesh_menu} ) {
@@ -169,7 +170,7 @@ our $terminator= "$Bin/terminator"; # script to kill a given process on timeout
 my $timeout = 0;
 my $rrange=undef;
 my $window=undef;
-if ( $test_selection eq 'failures' ) {                                                                    # Again, clean up logic
+if ( $test_selection eq 'failures' ) {  # Again, clean up logic
     $rrange = $FAILURES_RRANGE;
     $window = $FAILURES_WINDOW;
 } elsif ( $test_selection eq 'histogram-owdelay' ) {
@@ -247,7 +248,7 @@ my $test_nodes_ref = undef;
 my $test_ip_ref = undef;
 
 if ( $mesh_selection ) {                         # Note: nodes not in the selected mesh are ignored
-   ($node_counts,$test_nodes_ref,$test_ip_ref) = get_mesh_nodes($mesh_ref,$opt{test},$mesh_selection,$opt{n},$opt{nodes},$start,$end);
+   ($node_counts,$test_nodes_ref,$test_ip_ref) = get_mesh_nodes($mesh_ref,$opt{test},$mesh_selection,$opt{n},$opt{nodes},$start,$end); 
     $output .= "$node_counts\n";
     $total_nodes = scalar (@{$test_nodes_ref});
     foreach my $node (@{$test_nodes_ref}) {
@@ -274,9 +275,11 @@ if ( $mesh_selection ) {                         # Note: nodes not in the select
 
 $output .= "\nExecuting:\n";
 if ( $opt{mesh_menu} || $opt{mesh} ) {
-    $output .= "./verify --central $ds --port $port --mesh '$mesh_selection' --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
+    my $command = "./verify --central $ds --port $port --mesh '$mesh_selection' --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
+    $output .= $command;
 } else {
-    $output .= "./verify --central $ds --port $port --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
+    my $command = "./verify --central $ds --port $port --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
+    $output .= $command;
 }
 
 $date = gmtime();
@@ -438,7 +441,7 @@ sub call_with_timeout {
     eval {
         my $sighandler= sub {0 && print "$$: in signal handler for $_[0]\n";
                              $output .= "$$: $desc timed out with $_[0] after $timeout seconds";
-                             die "$$: $desc timed out with $_[0] after $timeout seconds" };   # should it die silently?
+                             die "$$: $desc timed out with $_[0] after $timeout seconds" };      # should it die silently?
         $SIG{$sigtouse}= $sighandler;
         if ($sigtouse eq 'ALRM') {
             alarm($timeout);
@@ -480,7 +483,12 @@ sub call_with_timeout {
             } else {
                 kill $timeoutpid;
             }
-            die;   # should it die silently?
+            print "#### About to die. Failure trace:\n";
+            print "$output\n";
+            print "Contents of \$\@: $@\n";
+            $logtime = gmtime();
+            print "#### Terminated script at:   $logtime UTC\n";
+            die;
         }
     }
     $output .= qq{$desc exited normally [elapsed=$elapsed]\n};
@@ -517,7 +525,7 @@ sub get_start_secs {
       $num = $1;
    } else {
       print "Bad entry: $start\n";
-      exit(0);
+      exit(1);
    }
 
    return $end - $num;
@@ -553,7 +561,7 @@ sub get_nodes {
         filters => $filters
     );
     end() if($client->error);
-    croak ( "Central data store is not responding. No comparisons possible at this time. Cause:\n" .
+    croak ( "Central data store is not responding. No comparisons possible at this time. Cause:\n" . 
           $client->error ) if($client->error);
 
     # Get measurements matching filters
@@ -587,7 +595,7 @@ sub get_nodes {
 }
 
 
-# gd logic changes with test type. Must clean up logic
+# gd logic changes with test type. Clean up logic if there is time
 sub gd {
     my ($list) = @_;
 
@@ -608,7 +616,7 @@ sub gd {
         $date = gmtime();
         $output .= "[$date] Connect to api\n";
         my $encoded_host = uri_escape($datastore);
-
+    
         my $clpath = new perfSONAR_PS::Client::Esmond::ApiConnect(
             url => "http://$encoded_host:$port/esmond/perfsonar/archive",
             filters => $filters
@@ -631,9 +639,9 @@ sub gd {
             push @error, $error;
             return @error;
         }
-
+    
         print Dumper($pd) if ( $opt{debug} );
-
+    
         foreach my $p ( @{$pd} ) {
             print Dumper($p) if ( $opt{debug} );
             # get data of a particular event type
@@ -725,7 +733,7 @@ sub gd {
                 ### TODO: Add error checking
                 foreach my $d ( @{$data} ) {
                     foreach my $hop ( @{$d->val} ) {
-                        my $error_message = '';
+                        my $error_message = ''; 
                         $error_message = $hop->{error_message} if ( defined $hop->{error_message} );
                         my $ip = '';
                         $ip = $hop->{ip} if ( defined $hop->{ip} );
@@ -800,18 +808,23 @@ sub threewaycompare {
         open($dh, '>', "$file_name");
     }
 
-    # Sample record
-    # time       time                meas. agent  src        dst          val        mk                               omk
+    # Sample record from the central store. Records from the remote sites have the same format, except the last field (omk)
+    # is not present.
+    # time      ,time               ,meas. agent ,src       ,dst         ,val       ,mk                              ,omk
     # 1432764947,2015-05-27T22:15:47,192.12.15.23,72.36.96.9,192.12.15.23,3005550000,0ddc0d3b12944be49ab5a8396e27a946,547fc3f735124dd8b3140871147f9c34
     # 0          1                   2            3          4            5          6                                7
+    #
     # Want:
     # central $key -> [0..4][7]  because we need to use org_metadata_key [7] of central to match metadata-key [6] of remote
     # remote  $key -> [0..4][6]  because we need to use metadata-key [6] of remote to match org_metadata_key [7] of central
     # $value       -> [5]
+    #
+    # Note:
+    # $value may be a comma-embedded string, so use Text::ParseWords parse_line, not split.
 
     # Generate hash tables
     foreach my $i (@{$cref}) {
-        my @fields = split(',', $i);
+        my @fields = parse_line(',', 0, $i);
         my $key = join(',', @fields[0..4]);
         $key .= ',' . $fields[7];
         my $value = $fields[5];
@@ -820,7 +833,7 @@ sub threewaycompare {
     }
 
     foreach my $j (@{$rref}) {
-        my @fields = split(',', $j);
+        my @fields = parse_line(',', 0, $j);
         my $key = join(',', @fields[0..4]);
         $key .= ',' . $fields[6];
         my $value = $fields[5];
@@ -929,27 +942,27 @@ sub date2sec {
     # Check that fields have valid values
     if ( $month !~ /\d+/ || $month < 1 || $month > 12 ) {
        print "Bad month entry. Try 1-12\n";
-       exit(0);
+       exit(1);
     }
     if ( $mday !~ /\d+/ || $mday < 1 || $mday > 31 ) {
        print "Bad day of month entry. Try 1-31\n";
-       exit(0);
+       exit(1);
     }
     if ( $year !~ /\d+/ || $year < 2015 ) {
        print "Bad year entry. Try 2015 up.\n";
-       exit(0);
+       exit(1);
     }
     if ( $hr !~ /\d+/ || $hr < 0 || $hr > 23 ) {
        print "Bad hour entry. Try 0-23\n";
-       exit(0);
+       exit(1);
     }
     if ( $min !~ /\d+/ || $min < 0 || $min > 59 ) {
        print "Bad minute entry. Try 0-59\n";
-       exit(0);
+       exit(1);
     }
     if ( $sec !~ /\d+/ || $sec < 0 || $sec > 59 ) {
        print "Bad second entry. Try 0-59\n";
-       exit(0);
+       exit(1);
     }
 
     # Pad fields with leading zero if needed
@@ -1002,7 +1015,7 @@ sub get_tests {
     }
     else {
        print "Enter a number under 'Selection' to choose a test from the menu.\n";
-       exit(0);
+       exit(1);
     }
 
     return $test_menu{$entry};
@@ -1057,7 +1070,7 @@ sub mesh_menu {
     }
     else {
         print "Enter a number under 'Selection' to choose a mesh from the menu.\n";
-        exit(0);
+        exit(1);
     }
 
     return $mesh_selection;
@@ -1093,7 +1106,7 @@ sub get_mesh_nodes {
             if ( $mon{$node} ) {
                 push @confirmed_nodes, $node;
             }
-        }
+        } 
         @test_nodes = @confirmed_nodes;
         $node_list = join( ',', @test_nodes );
     } elsif ( $n ) { # node number provided
@@ -1233,20 +1246,21 @@ sub help {
 
     Verify is a Perl script that compares perfSONAR data in remote perfSONAR hosts to the same data collected in
     centralized data stores. Its purpose is to confirm that the data centralization process is complete and accurate.
-
-    Comparisons Performed
-    1) Alteration - This checks for items in both the central store and the remote perfSONAR hosts where values differ.
-    2) Validation - This checks for items in the central store that are not in the remote perfSONAR hosts.
+    
+    Comparisons Performed  
+    1) Alteration - This checks for items in both the central store and the remote perfSONAR hosts where values differ.  
+    2) Validation - This checks for items in the central store that are not in the remote perfSONAR hosts.  
     3) Coverage - This checks for items in the remote perfSONAR hosts that are not in the central store.
-
+    
     Typically, the script will be executed from cron, specifying a central repository to test with, a mesh and/or test
     type to use, and the number of perfSONAR hosts to include in the test. The script will select the hosts, start, and
     end times at "random", perform the tests, and return results. It is also possible to specify the perfSONAR hosts to test
     against, along with start and end times. This is helpful when interested in repeating the same test.
-
+    
     Options
-    --central    - String. The host name or IP address of the central repository
-    --mesh       - String. The mesh to use
+    --central    - String. The host name or IP address of the central repository  
+    --port       - Optional integer. Port used to access the central repository. Default is 80.
+    --mesh       - String. The mesh to use  
     --mesh_menu  - Integer. Allows selection of a mesh from a list. Helpful when the mesh name is not known.
     --test       - String. The test type to select. Available types are:
                    failures, histogram-owdelay, histogram-ttl, packet-count-lost, packet-count-sent, packet-loss-rate,
@@ -1277,26 +1291,26 @@ sub help {
                    This option forces an update to occur prior to running verify. Note: The update may take a few minutes to
                    complete and is meant to be used sparingly.
     --help       - Displays this information
-
-    Sample Usage
+ 
+    Sample Usage  
     - Compare pack-count-sent data between the central store (psds1.grid.iu.edu) and two script-selected perfSONAR hosts
-      that collect pack-count-sent data for a script-selected time range
+      that collect pack-count-sent data for a script-selected time range  
       $Script --central psds1.grid.iu.edu --test packet-count-sent --n 2
-
+    
     - Compare packet-loss-rate data between the central data store and one script-selected host, returning only alteration
-      and validation differences; i.e., ignoring coverage test results
+      and validation differences; i.e., ignoring coverage test results  
       $Script --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display validate
-
+    
     - Compare packet-count-sent data from the central repository, using port 9090, with data from two specified hosts for
-      the specified time range
+      the specified time range  
       $Script --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent \
              --nodes sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
-
-    - Request a comparison with specific perfSONAR hosts in a given mesh for a specified time range
+    
+    - Request a comparison with specific perfSONAR hosts in a given mesh for a specified time range  
       $Script --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals \
              --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 07/02/2015,05:29:28 --end_date 07/02/2015,10:52:01 --display all
-
-    - Allow user to select a test type and mesh from option lists
+    
+    - Allow user to select a test type and mesh from option lists  
       $Script --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2
 
     $Script version $VERSION
