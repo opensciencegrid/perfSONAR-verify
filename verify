@@ -230,7 +230,7 @@ if ( $opt{start} && $opt{end} ) {
 
 my $logtime = gmtime();
 $output  = "\n\n__________________________________________________________\n\n";
-$output .= "Started script at:   $logtime UTC\n";
+$output .= "Started script (pid $$) at:   $logtime UTC\n";
 $output .= "\nInitiating a sample comparison between $test_selection archives in the\n";
 $output .= "Esmond data store ($ds:$port) and remote perfSONAR nodes.\n";
 $output .= "Selected UTC start time: " . sec2date( $start ) . " (UNIX time: $start)\n";
@@ -403,7 +403,7 @@ sub read_conf {
 
     my $ch=undef;
     my %config=();
-    open( $ch, '<', $conf_file ) or die "Could not open configuration file '$conf_file'.\n";
+    open( $ch, '<', $conf_file ) or die "(pid $$) - Could not open configuration file '$conf_file'.\n";
     while (<$ch>) {
         next if ( $_ =~ m/^#/ );
         chomp $_;
@@ -439,9 +439,9 @@ sub call_with_timeout {
     my $timeoutpid= undef;
 
     eval {
-        my $sighandler= sub {0 && print "$$: in signal handler for $_[0]\n";
-                             $output .= "$$: $desc timed out with $_[0] after $timeout seconds";
-                             die "$$: $desc timed out with $_[0] after $timeout seconds" };      # should it die silently?
+        my $sighandler= sub {0 && print "pid $$: in signal handler for $_[0]\n";
+                             $output .= "pid $$: $desc timed out with $_[0] after $timeout seconds";
+                             die };
         $SIG{$sigtouse}= $sighandler;
         if ($sigtouse eq 'ALRM') {
             alarm($timeout);
@@ -450,7 +450,7 @@ sub call_with_timeout {
             $timeoutpid=fork();
             if ($timeoutpid == 0) {   # Child process
                 exec($terminator,$sigtouse,$fncallingpid,$timeout,$verbose);
-                die "could not exec $terminator\n";
+                die "(pid $fncallingpid) - could not exec $terminator\n";
             }
         }
 
@@ -487,7 +487,7 @@ sub call_with_timeout {
             print "$output\n";
             print "Contents of \$\@: $@\n";
             $logtime = gmtime();
-            print "#### Terminated script at:   $logtime UTC\n";
+            print "#### Terminated script (pid $$) at:   $logtime UTC\n";
             die;
         }
     }
@@ -498,7 +498,7 @@ sub call_with_timeout {
 
 sub end {
     $logtime = gmtime();
-    $output .= "Ended script at:   $logtime UTC\n";
+    $output .= "Ended script (pid $$) at:   $logtime UTC\n";
 }
 
 
@@ -552,6 +552,10 @@ sub get_nodes {
     # Define filters
     my $filters = new perfSONAR_PS::Client::Esmond::ApiFilters();
     $filters->time_start($start) if ( $start );
+    # use bogus end time value on metadata as workaround to prevent racing condition
+    # that may occur due to postgres time stamps at microsecond granularity, whereas
+    # esmond time stamps are at the granularity of seconds.
+    $filters->time_end(time + 86400) if ( $start );
     $filters->event_type("$test");
 
     # Connect to api
@@ -608,6 +612,10 @@ sub gd {
     # Note: Use time_start() on metadata, time_end() on data
     my $filters = new perfSONAR_PS::Client::Esmond::ApiFilters();
     $filters->time_start($start) if ( $start );     # Filters on metadata time_updated value
+    # use bogus end time value on metadata as workaround to prevent racing condition
+    # that may occur due to postgres time stamps at microsecond granularity, whereas
+    # esmond time stamps are at the granularity of seconds.
+    $filters->time_end(time + 86400) if ( $start );
     $filters->event_type($test);
     $filters->measurement_agent($mon);
 
@@ -1035,10 +1043,6 @@ sub get_nodes_by_mesh {
     my $json = `cat $DATA/$MESHES`;
     my $pd = decode_json($json);
     foreach my $mesh_key (sort keys %{$pd}) {
-        my @nodes=();
-        foreach my $node ( @{$pd->{$mesh_key}->{members}} ) {
-            push(@nodes,$node);
-        }
         $mm{$mesh_key} = $pd->{$mesh_key}->{members};
     }
     return (\%mm);
@@ -1145,7 +1149,7 @@ sub get_node_ips {
 
     my %node_ip=();
     my $fh;
-    open( $fh, '<', $file_name ) or die "Could not open the nodes file '$file_name'.\n";
+    open( $fh, '<', $file_name ) or die "(pid $$) - Could not open the nodes file '$file_name'.\n";
 
     while( <$fh> ) {
         chomp $_;

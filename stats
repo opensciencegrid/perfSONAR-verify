@@ -18,12 +18,13 @@ use strict;
 use warnings;
 
 if ( !defined $ARGV[1] ) {
-    print "\nUsage: stats path datastore-name\n";
+    print "Usage:\n";
+    print "stats path datastore-name\n";
     print "where path to the log file is relative or absolute\n";
     print "and datastore-name is the name used by the validation\n";
     print "script to identify a central datastore.\n";
 
-    print "\nExamples:\n";
+    print "Examples:\n";
     print "stats ../logs fermicloud\n";
     print "stats ../logs psds-itb2\n";
     print "\n";
@@ -47,12 +48,16 @@ my $pctg=undef;
 my %alt=();
 my %cov=();
 my %val=();
+my %rem=();
+my %cen=();
 
 my @tests = ('failures','histogram-owdelay','histogram-ttl',
              'packet-count-lost','packet-count-sent','packet-loss-rate',
              'packet-retransmits','packet-retransmits-subintervals',
              'packet-trace','throughput','throughput-subintervals');
 
+# Sample result from sum
+# totals from central: 10368 from remotes: 10403 alteration: 0 validation: 177 coverage: 212
 foreach my $test (@tests) {
     my $file = "$test" . '_' . $store . '_verify.log';
     $sums = `./sum $path/$file`;
@@ -69,15 +74,17 @@ printf("remotes:   %8d \t coverage:   %8d \t %5.1f %%\n", $gtr,$gtg,$pctg);
 printf("alteration:%8d\n", $gta);
 print "\nsources of discrepancies\n\n";
 foreach my $key (sort {lc $a cmp lc $b} keys %alt) {
-    print "alteration found in: $key\n";
+    printf("alteration (count: %6d) found in: $key\n", $alt{$key});
 }
 print "\n";
 foreach my $key (sort {lc $a cmp lc $b} keys %cov) {
-    print "  coverage found in: $key\n";
+    my $pc = $cov{$key}/$rem{$key}*100;
+    printf("  coverage [count: %6d  %4.1f %%] found in: $key\n", $cov{$key},$pc );
 }
 print "\n";
 foreach my $key (sort {lc $a cmp lc $b} keys %val) {
-    print "validation found in: $key\n";
+    my $pv = $val{$key}/$cen{$key}*100;
+    printf("validation [count: %6d  %4.1f %%] found in: $key\n", $val{$key},$pv);
 }
 
 
@@ -91,7 +98,9 @@ sub kaching {
     $gta += $sums[8];    # alteration
     $gtv += $sums[10];   # validation
     $gtg += $sums[12];   # coverage
-    $alt{$file} = 1 if ( $sums[8] );
-    $cov{$file} = 1 if ( $sums[12] );
-    $val{$file} = 1 if ( $sums[10] );
+    $alt{$file} = $sums[8]  if ( $sums[8]  );
+    $cov{$file} = $sums[12] if ( $sums[12] );
+    $rem{$file} = $sums[6]  if ( $sums[6]  );
+    $val{$file} = $sums[10] if ( $sums[10] );
+    $cen{$file} = $sums[3]  if ( $sums[3]  );
 }

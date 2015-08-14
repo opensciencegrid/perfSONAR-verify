@@ -35,32 +35,32 @@
 # TODO
 # use library
 
-# The links below are available from https://myosg.grid.iu.edu/pfmesh
+# The links below are available from http://myosg.grid.iu.edu/pfmesh
 
-# USATLAS Mesh Config   https://myosg.grid.iu.edu/psmesh/json/name/us-atlas
-# USCMS Mesh Config     https://myosg.grid.iu.edu/psmesh/json/name/us-cms
-# CA Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/ca-all
-# DE Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/de-all
-# ES Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/es-all
-# FR Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/fr-all
-# IT ATLAS Mesh Config  https://myosg.grid.iu.edu/psmesh/json/name/it-atlas
-# IT CMS Mesh Config    https://myosg.grid.iu.edu/psmesh/json/name/it-cms
-# LHCONE Mesh Config    https://myosg.grid.iu.edu/psmesh/json/name/lhcone-all
-# ND Mesh Config        https://myosg.grid.iu.edu/psmesh/json/name/nd-all
-# OPN Config            https://myosg.grid.iu.edu/psmesh/json/name/opn-all
-# RU Config             https://myosg.grid.iu.edu/psmesh/json/name/ru-all
-# TW Config             https://myosg.grid.iu.edu/psmesh/json/name/tw-all
-# UK Config             https://myosg.grid.iu.edu/psmesh/json/name/uk-all
-# Bandwidth tests between all WLCG hosts        https://myosg.grid.iu.edu/psmesh/json/name/wlcg-all
-# OSG Grid Operations Center Test Mesh Config   https://myosg.grid.iu.edu/psmesh/json/name/osg-goc
-# perfSONAR Testbed                             https://myosg.grid.iu.edu/psmesh/json/name/ps-testbed
-# Dual-Stack Mesh Config                        https://myosg.grid.iu.edu/psmesh/json/name/dual-stack
-# Latin America Config                          https://myosg.grid.iu.edu/psmesh/json/name/la-all
-# Latency tests between all WLCG hosts          https://myosg.grid.iu.edu/psmesh/json/name/wlcg-latency-all
-# Debug Mesh (temp)                             https://myosg.grid.iu.edu/psmesh/json/name/DebugMesh
-# Belle II Mesh                                 https://myosg.grid.iu.edu/psmesh/json/name/BelleII
-# Global Mesh                                   https://myosg.grid.iu.edu/psmesh/json/name/global
-# All Mesh config                               https://myosg.grid.iu.edu/psmesh/all
+# USATLAS Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/us-atlas
+# USCMS Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/us-cms
+# CA Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/ca-all
+# DE Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/de-all
+# ES Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/es-all
+# FR Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/fr-all
+# IT ATLAS Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/it-atlas
+# IT CMS Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/it-cms
+# LHCONE Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/lhcone-all
+# ND Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/nd-all
+# OPN Config		http://myosg.grid.iu.edu/psmesh/json/name/opn-all
+# RU Config		http://myosg.grid.iu.edu/psmesh/json/name/ru-all
+# TW Config		http://myosg.grid.iu.edu/psmesh/json/name/tw-all
+# UK Config		http://myosg.grid.iu.edu/psmesh/json/name/uk-all
+# Bandwidth tests between all WLCG hosts	http://myosg.grid.iu.edu/psmesh/json/name/wlcg-all
+# OSG Grid Operations Center Test Mesh Config	http://myosg.grid.iu.edu/psmesh/json/name/osg-goc
+# perfSONAR Testbed				http://myosg.grid.iu.edu/psmesh/json/name/ps-testbed
+# Dual-Stack Mesh Config			http://myosg.grid.iu.edu/psmesh/json/name/dual-stack
+# Latin America Config				http://myosg.grid.iu.edu/psmesh/json/name/la-all
+# Latency tests between all WLCG hosts		http://myosg.grid.iu.edu/psmesh/json/name/wlcg-latency-all
+# Debug Mesh (temp)				http://myosg.grid.iu.edu/psmesh/json/name/DebugMesh
+# Belle II Mesh					http://myosg.grid.iu.edu/psmesh/json/name/BelleII
+# Global Mesh					http://myosg.grid.iu.edu/psmesh/json/name/global
+# All Mesh config				http://myosg.grid.iu.edu/psmesh/all
 
 use strict;
 use warnings;
@@ -111,7 +111,7 @@ sub read_conf {
 # [
 #     {
 #         include: [
-#         "https://myosg.grid.iu.edu/psmesh/json/name/us-atlas"
+#         "http://myosg.grid.iu.edu/psmesh/json/name/us-atlas"
 #         ]
 #     },
 # ...
@@ -128,7 +128,7 @@ sub update_meshes {
             $mm{$test->{description}} = $test->{members};
         }
     }
-
+    
     # Encode hash
     my $jm = JSON->new->allow_nonref;
     my $jm_text = $jm->encode(\%mm);
