@@ -5,17 +5,20 @@
 # the counts of interest in each validation output file.
 
 # Usage:
-# stats path datastore-name
-# where path to the log file is relative or absolute
-# and datastore-name is the name used by the validation
-# script to identify a central datastore.
+# stats path datastore-name [--JSON]
+# where path to the log file is relative or absolute,
+# datastore-name is the name used by the validation
+# script to identify a central datastore, and option
+# --JSON is used to output results in JSON format. The
+# default is plain text output.
 
 # Examples:
 # stats ../logs fermicloud
-# stats ../logs psds-itb2
+# stats ../logs psds1 --JSON
 
 use strict;
 use warnings;
+use JSON;
 
 if ( !defined $ARGV[1] ) {
     print "Usage:\n";
@@ -31,9 +34,10 @@ if ( !defined $ARGV[1] ) {
     exit;
 }
 
+my $format=undef;
+$format = $ARGV[2] if ( defined $ARGV[2] );
 my $store = $ARGV[1];
 my $path  = $ARGV[0];
-print "central store: $store\n\n";
 
 my $sums=undef;
 my @sums=undef;
@@ -68,23 +72,97 @@ $pct_diff  = ($gtr-$gtc)/$gtr*100;
 $pctv = $gtv/$gtc*100;
 $pctg = $gtg/$gtr*100;
 
-printf("central:   %8d \t remotes:    %8d \t %5.1f %% diff\n", $gtc,$gtr,$pct_diff);
-printf("central:   %8d \t validation: %8d \t %5.1f %%\n", $gtc,$gtv,$pctv);
-printf("remotes:   %8d \t coverage:   %8d \t %5.1f %%\n", $gtr,$gtg,$pctg);
-printf("alteration:%8d\n", $gta);
-print "\nsources of discrepancies\n\n";
-foreach my $key (sort {lc $a cmp lc $b} keys %alt) {
-    printf("alteration (count: %6d) found in: $key\n", $alt{$key});
-}
-print "\n";
-foreach my $key (sort {lc $a cmp lc $b} keys %cov) {
-    my $pc = $cov{$key}/$rem{$key}*100;
-    printf("  coverage [count: %6d  %4.1f %%] found in: $key\n", $cov{$key},$pc );
-}
-print "\n";
-foreach my $key (sort {lc $a cmp lc $b} keys %val) {
-    my $pv = $val{$key}/$cen{$key}*100;
-    printf("validation [count: %6d  %4.1f %%] found in: $key\n", $val{$key},$pv);
+if ( defined $format && $format eq '--JSON' ) {
+    my %tophash=();
+    my $json = JSON->new->allow_nonref;
+
+    # Structure general data
+    my $date = `date`;
+    chomp $date;
+    $tophash{'central_store'} = "$store";
+    $tophash{'date'} = "$date";
+    $tophash{'name'} = "perfSONAR/Esmond Discrepancy Checks";
+
+    # Structure summary data
+    my %shash=();
+    $shash{'central_count'} = $gtc;
+    $shash{'remote_count'} = $gtr;
+    $shash{'validation_count'} = $gtv;
+    $shash{'coverage_count'} = $gtg;
+    $shash{'alteration_count'} = $gta;
+    $shash{'central_to_remote_pct_diff'} = $pct_diff;
+    $shash{'pct_validation'} = $pctv;
+    $shash{'pct_coverage'} = $pctg;
+    my $json_text = $json->encode(\%shash);
+    $tophash{'summary'} = $json_text;
+
+    # Structure coverage detail
+    my %chash=();
+    my @cov=();
+    foreach my $key (sort {lc $a cmp lc $b} keys %cov) {
+        my $pc = $cov{$key}/$rem{$key}*100;
+        $chash{'log'} = $key;
+        $chash{'count'} = $cov{$key};
+        $chash{'pct'} = $pc;
+        my $json = JSON->new->allow_nonref;
+        my $json_text = $json->encode(\%chash);
+        push @cov, $json_text;
+    }
+    $tophash{'coverage'} = [@cov];
+
+    # Structure validation detail
+    my %vhash=();
+    my @val=();
+    foreach my $key (sort {lc $a cmp lc $b} keys %val) {
+        my $pc = $val{$key}/$rem{$key}*100;
+        $vhash{'log'} = $key;
+        $vhash{'count'} = $val{$key};
+        $vhash{'pct'} = $pc;
+        my $json = JSON->new->allow_nonref;
+        my $json_text = $json->encode(\%vhash);
+        push @val, $json_text;
+    }
+    $tophash{'validation'} = [@val];
+
+    # Structure alteration detail
+    my %ahash=();
+    my @alt=();
+    foreach my $key (sort {lc $a cmp lc $b} keys %alt) {
+        my $pc = $alt{$key}/$rem{$key}*100;
+        $ahash{'log'} = $key;
+        $ahash{'count'} = $alt{$key};
+        $ahash{'pct'} = $pc;
+        my $json = JSON->new->allow_nonref;
+        my $json_text = $json->encode(\%ahash);
+        push @alt, $json_text;
+    }
+    $tophash{'alteration'} = [@alt];
+
+    # Finalize
+    $json_text = $json->encode(\%tophash);
+    my $perl_scalar = $json->decode( $json_text );
+    my $pretty_printed = $json->pretty->encode( $perl_scalar );
+    print "$pretty_printed\n";
+} else {
+    print "central store: $store\n\n";
+    printf("central:   %8d \t remotes:    %8d \t %5.1f %% diff\n", $gtc,$gtr,$pct_diff);
+    printf("central:   %8d \t validation: %8d \t %5.1f %%\n", $gtc,$gtv,$pctv);
+    printf("remotes:   %8d \t coverage:   %8d \t %5.1f %%\n", $gtr,$gtg,$pctg);
+    printf("alteration:%8d\n", $gta);
+    print "\nsources of discrepancies\n";
+    foreach my $key (sort {lc $a cmp lc $b} keys %alt) {
+        printf("alteration (count: %6d) found in: $key\n", $alt{$key});
+    }
+    print "\n";
+    foreach my $key (sort {lc $a cmp lc $b} keys %cov) {
+        my $pc = $cov{$key}/$rem{$key}*100;
+        printf("  coverage [count: %6d  %4.1f %%] found in: $key\n", $cov{$key},$pc );
+    }
+    print "\n";
+    foreach my $key (sort {lc $a cmp lc $b} keys %val) {
+        my $pv = $val{$key}/$cen{$key}*100;
+        printf("validation [count: %6d  %4.1f %%] found in: $key\n", $val{$key},$pv);
+    }
 }
 
 
