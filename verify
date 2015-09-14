@@ -19,7 +19,6 @@ use URI::Escape;
 use JSON;
 use Carp;
 use Data::Dumper;
-use Text::ParseWords;
 
 use lib '/opt/perfsonar_ps/toolkit/lib/';
 use perfSONAR_PS::Client::Esmond::ApiFilters;
@@ -66,7 +65,7 @@ my $DELAY=$config{DELAY};
 $DATA = "$Bin/../$DATA"; # Convert to a full path
 
 
-my $VERSION = '1.4';
+my $VERSION = '1.5';
 
 my $date=undef;
 my $fh=undef;
@@ -795,6 +794,55 @@ sub gd {
 }
 
 
+sub parse_line {
+    my ( $rec, $host ) = @_;
+
+    # Comma-separated subparts
+    my @r=split(',', $rec);
+    my $count=1;
+    foreach my $item (@r) {
+        $count++;
+    }
+ 
+    # Constructing fields
+ 
+    # Split the string and count how many comma-separated fields result.
+    # Fields 0-4 go into $utc, $date, $mon, $src, and $dst, respectively.
+    # The last field goes to $mk for remote sites. The remainder are then
+    # concatenated as $val. There must be 7 fields altogether for remotes
+    # and 8 fields for the central store ($mk->field 6; $omk->field 7).
+ 
+    my $total_parts = scalar @r;
+    my $utc  = $r[0];
+    my $date = $r[1];
+    my $mon  = $r[2];
+    my $src  = $r[3];
+    my $dst  = $r[4];
+    my $val=undef;
+    my $mk=undef;
+    my $omk=undef;
+    if ( $host eq 'central' ) {
+        # case of central server
+        # 8 fields
+        # $omk is last field
+        # $mk is next to last
+        # total fields = 8;
+        $mk  = $r[-2];
+        $omk = $r[-1];
+        $val = join(',',@r[5..$total_parts-3]);
+    } else {
+        # case of remote server
+        # 7 fields
+        # $mk is last field
+        # total fields = 7;
+        $mk  = $r[-1];
+        $val = join(',',@r[5..$total_parts-2]);
+    }
+
+    return ( $utc,$date,$mon,$src,$dst,$val,$mk,$omk );
+}
+
+
 sub threewaycompare {
     my ($cref,$rref,$display,$prefix) = @_;
 
@@ -828,11 +876,11 @@ sub threewaycompare {
     # $value       -> [5]
     #
     # Note:
-    # $value may be a comma-embedded string, so use Text::ParseWords parse_line, not split.
+    # $value may be a comma-embedded string
 
     # Generate hash tables
     foreach my $i (@{$cref}) {
-        my @fields = parse_line(',', 0, $i);
+        my @fields = parse_line($i,'central');
         my $key = join(',', @fields[0..4]);
         $key .= ',' . $fields[7];
         my $value = $fields[5];
@@ -841,7 +889,7 @@ sub threewaycompare {
     }
 
     foreach my $j (@{$rref}) {
-        my @fields = parse_line(',', 0, $j);
+        my @fields = parse_line($j,'remote');
         my $key = join(',', @fields[0..4]);
         $key .= ',' . $fields[6];
         my $value = $fields[5];
