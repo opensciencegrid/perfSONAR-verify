@@ -46,6 +46,7 @@ while (<$fh>) {
         }
     }
 }
+$alt_sum = $alt_sum/2; # 2 records => 1 count
 
 
 # Rewind and find validation count

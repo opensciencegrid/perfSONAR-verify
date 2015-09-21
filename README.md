@@ -10,17 +10,18 @@ Typically, the script will be executed from cron, specifying a central repositor
 
 #### Options
 ```
---central    - String. The host name or IP address of the central repository  
---port       - Optional integer. Port used to access the central repository. Default is 80. 
+--central    - Comma-separated string. The host name or IP address of one or more central repositories, each optionally
+               followed by a colon (:) and a port number. Default port number is 80. Alternatively, use 'all' to select
+               all central repositories, in which case the host names and ports are obtained from the configuration file. 
 --mesh       - String. The mesh to use  
---mesh_menu  - Integer. Allows selection of a mesh from a list. Helpful when the mesh name is not known.
---test       - String. The test type to select. Available types are:
-               failures, histogram-owdelay, histogram-ttl, packet-count-lost, packet-count-sent, packet-loss-rate,
-               packet-retransmits, packet-retransmits-subintervals, packet-trace, throughput, throughput-subinterval
---test_menu  - Integer. Allows selection of a test type from a list. Helpful when the test name is not known.
---n          - Integer. The number of perfSONAR nodes to select for testing. Ignored when --nodes is used.
---nodes      - Optional. A comma-separated list of perfSONAR host names or IP addresses to test with
-               (if specific nodes are desired)
+--mesh_menu  - Integer. Allows selection of a mesh from a list. Helpful when the mesh name is not known. 
+--test       - String. The test type to select. Available types are: 
+               failures, histogram-owdelay, histogram-ttl, packet-count-lost, packet-count-sent, packet-loss-rate, 
+               packet-retransmits, packet-retransmits-subintervals, packet-trace, throughput, throughput-subinterval 
+--test_menu  - Integer. Allows selection of a test type from a list. Helpful when the test name is not known. 
+--n          - Integer. The number of perfSONAR nodes to select for testing. Ignored when --nodes is used. 
+--nodes      - Optional. A comma-separated list of perfSONAR host names or IP addresses to test with 
+               (if specific nodes are desired) 
 --start      - Optional integer. Select records with a UTC epoch seconds time stamp >= this value
 --end        - Optional integer. Select records with a UTC epoch seconds time stamp <= this value
 --start_date - Optional. Like start but uses a UTC date string with format [M]M/[D]D/YY[YY][,[h]h[:[m]m[:[s]s]]]
@@ -28,47 +29,60 @@ Typically, the script will be executed from cron, specifying a central repositor
 --last       - Optional. Designates the last so many time units as the start time. End time is "now".
                Possible values are in the form of nw, nd, nh, nm, or ns, where n is a positive integer and
                w = weeks, d = days, h = hours, m = minutes, s = secs.
---delay      - Optional. Skip records with time stamps more recent than this many seconds ago. Default value is
-               stored in the conf file. This gives time for the central store to sync up with remote stores and
-               reduce false positives. It is ignored when start/end parameters are specified. It is referenced
-               otherwise.
---display    - Optional string. Select test results to display. Default action is to show all tests
-               (either by not using it or with --display all)
-               --display validate => show alteration and validation
-               --display coverage => show alteration and coverage
---out        - Optional path and file name prefix. Outputs raw data to three different files. File names are of format
-               "path/prefix-[timestamp].[source]", where timestamp refers to the UNIX time the script ran and source is
-               "central" for the central store, "remote" for perfSONAR hosts, "diff" for their comparison.
---update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.
-               This option forces an update to occur prior to running verify. Note: The update may take a few minutes to
-               complete and is meant to be used sparingly.
---help       - Displays this information
+--delay      - Optional. Skip records with time stamps more recent than this many seconds ago. Default value is 
+               stored in the conf file. This gives time for the central store to sync up with remote stores and 
+               reduce false positives. It is ignored when start/end parameters are specified. It is referenced 
+               otherwise. 
+--display    - Optional string. Select test results to display. Default action is to show all tests 
+               (either by not using it or with --display all) 
+               --display validate => show alteration and validation 
+               --display coverage => show alteration and coverage 
+--out        - Optional path and file name prefix for collected data used in generating the log. Remote data is written to 
+               "path/prefix-[timestamp].remote"; the other file names take the format "path/prefix-[host]-[timestamp].[source]". 
+               The central store short name goes in [host], [timestamp] refers to the UNIX time the script ran and [source] is 
+               "central" for the central store, or "diff" for the remote/central comparison. 
+--split_logs - Optional. The verify script generally outputs results to STDOUT. Use this option when it is desired to output 
+               results to different log files, each corresponding to a central store identified in the --central option. 
+--update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository. 
+               This option forces an update to occur prior to running verify. Note: The update may take a few minutes to 
+               complete and is meant to be used sparingly. 
+--help       - Displays this information 
 ```
 
 #### Sample Usage  
-- Compare pack-count-sent data between the central store (psds1.grid.iu.edu) and two script-selected perfSONAR hosts that collect pack-count-sent data for a script-selected time range  
+- Compare pack-count-sent data between the central store (psds1.grid.iu.edu) and two script-selected perfSONAR hosts that collect pack-count-sent data for a script-selected time range. Output results to STDOUT. 
 ```
 verify --central psds1.grid.iu.edu --test packet-count-sent --n 2
 ```
 
-- Compare packet-loss-rate data between the central data store and one script-selected host, returning only alteration and validation differences; i.e., ignoring coverage test results  
+- Compare packet-loss-rate data between the central data store and one script-selected host, returning only alteration and validation differences; i.e., ignoring coverage test results to STDOUT. 
 ```
-verify --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display validate
+verify --test packet-loss-rate --central psds2.grid.iu.edu --n 1 --display validate
 ```
 
 - Compare packet-count-sent data from the central repository, using port 9090, with data from two specified hosts for the specified time range  
 ```
-verify --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent --nodes  sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
+verify --central fermicloud171.fnal.gov:9090 --test packet-count-sent --nodes sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
 ```
 
 - Request a comparison with specific perfSONAR hosts in a given mesh for a specified time range  
 ```
-verify --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 07/02/2015,05:29:28 --end_date 07/02/2015,10:52:01 --display all
+verify --central fermicloud171.fnal.gov:9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 09/12/2015,05:29:28 --end_date 09/12/2015,10:52:01
+```
+
+- Compare throughput data between all central stores (identified it the config file) and four script-selected perfSONAR hosts which collect throughput data in the given mesh for a script-selected time range. Store raw data in files with prefix ../logs/vtest and output final results to separate throughput log files, according to the selected central stores. 
+```
+verify -central all --mesh 'USATLAS Bandwidth Mesh Test' --test throughput -n 4 --out ../logs/vtest --split_logs
+```
+   
+- Compare failures data between two specified central hosts and three script-selected perfSONAR hosts which collect failures data in the given mesh for a script-selected time range. Output results to STDOUT. 
+```
+verify -central fermicloud171.fnal.gov:9090,psds1.grid.iu.edu --mesh 'USATLAS Bandwidth Mesh Test' --test throughput -n 3
 ```
 
 - Allow user to select a test type and mesh from option lists  
 ```
-verify --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2
+verify --central fermicloud171.fnal.gov:9090 --mesh_menu --test_menu -n 2
 ```
 
 #### Installation

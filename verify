@@ -34,6 +34,7 @@ my %config = read_conf($conf_file);
 
 # Config variables
 my $DATA=$config{DATA};
+my $LOGS=$config{LOGS};
 my $MESHES=$config{MESHES};
 my $NODES=$config{NODES};
 my $FAILURES_RRANGE=$config{FAILURES_RRANGE};
@@ -61,11 +62,13 @@ my $THROUGHPUT_SUBINTERVALS_WINDOW=$config{THROUGHPUT_SUBINTERVALS_WINDOW};
 my $TIMEOUT=$config{TIMEOUT};
 my $VERBOSE=$config{VERBOSE};
 my $DELAY=$config{DELAY};
+my $CENTRAL_STORES=$config{CENTRAL_STORES};
 
-$DATA = "$Bin/../$DATA"; # Convert to a full path
+# Convert relative to full paths
+$DATA = "$Bin/../$DATA";
+$LOGS = "$Bin/../$LOGS";
 
-
-my $VERSION = '1.5';
+my $VERSION = '1.6';
 
 my $date=undef;
 my $fh=undef;
@@ -76,7 +79,6 @@ GetOptions( \%opt,
                              # cover (does alteration & coverage),
                              # default: all (does alteration, validation, & coverage)
             "central=s",     # central data store
-            "port=i",        # port number
             "test=s",        # test (e.g., throughput, histogram-owdelay)
             "test_menu",     # provides a list of all tests from which to select
             "mesh=s",        # mesh name
@@ -90,6 +92,7 @@ GetOptions( \%opt,
             "last=s",        # designates the last so many time units as the start time
             "delay=i",       # return only records older than this many seconds
             "out=s",         # output raw data. See help.
+            "split_logs",    # log results to their respective test-type/central-store logs
             "update",        # force update of mesh-host information
             "debug",
             "help"
@@ -103,14 +106,45 @@ if ( $opt{help} ) {
 # allow user override of delay
 $DELAY = $opt{delay} if ( $opt{delay} );
 
-my $ds = $opt{central} || 'psds1.grid.iu.edu';
-my $port = $opt{port} || 80;
+# identify all central hosts and ports to use
+my %ch_port=();
+if (!defined $opt{central}) {
+    print "Specify for --central a comma-separated list of central data store DNS names or IP addresses\n";
+    print "follwed by an optional port number if not default port 80. Or use 'all' to query all stores.\n";
+    exit(1);
+}
+if ( $opt{central} eq 'all' ) {
+    my @ch = split(',', $CENTRAL_STORES);
+    foreach my $h (@ch) {
+        my ( $host, $port ) = split(':',$h);
+        if ( $port ) {
+            $ch_port{$host} = $port;
+        } else {
+            $ch_port{$host} = 80;
+        }
+    }
+} elsif ( $opt{central} ){
+    my $ch_list = $opt{central};
+    my @ch = split(',', $ch_list);
+    foreach my $h (@ch) {
+        my ( $host, $port ) = split(':',$h);
+        if ( $port ) {
+            $ch_port{$host} = $port;
+        } else {
+            $ch_port{$host} = 80;
+        }
+    }
+} else {
+    print "Specify for --central a comma-separated list of central data store DNS names or IP addresses\n";
+    print "follwed by an optional port number if not default port 80. Or use 'all' to query all stores.\n";
+    exit(1);
+}
 
 my $display = $opt{display} || 'all';
 if ( $display ne 'all' &&
      $display ne 'validate' &&
      $display ne 'cover' ) {
-    print "Specify for --display 'validate', 'cover', 'all', or exclude the option for all\n";
+    print "Specify for --display 'validate', 'cover', 'all'; or simply exclude the option, which gets all.\n";
     exit(1);
 }
 
@@ -227,16 +261,6 @@ if ( $opt{start} && $opt{end} ) {
 }
 
 
-my $logtime = gmtime();
-$output  = "\n\n__________________________________________________________\n\n";
-$output .= "Started script (pid $$) at:   $logtime UTC\n";
-$output .= "\nInitiating a sample comparison between $test_selection archives in the\n";
-$output .= "Esmond data store ($ds:$port) and remote perfSONAR nodes.\n";
-$output .= "Selected UTC start time: " . sec2date( $start ) . " (UNIX time: $start)\n";
-$output .= "Selected UTC end   time: " . sec2date( $end ) . " (UNIX time: $end)\n";
-$output .= "Selected mesh: $mesh_selection\n" if ( $mesh_selection );
-
-
 # Node selection process
 $date = gmtime();
 my $node_counts = undef;
@@ -246,21 +270,21 @@ my @test_nodes  = ();
 my $test_nodes_ref = undef;
 my $test_ip_ref = undef;
 
-if ( $mesh_selection ) {                         # Note: nodes not in the selected mesh are ignored
-   ($node_counts,$test_nodes_ref,$test_ip_ref) = get_mesh_nodes($mesh_ref,$opt{test},$mesh_selection,$opt{n},$opt{nodes},$start,$end); 
+if ( $mesh_selection ) {   # Note: nodes not in the selected mesh are ignored
+   ($node_counts,$test_nodes_ref,$test_ip_ref) =
+        get_mesh_nodes($mesh_ref,$opt{test},$mesh_selection,$opt{n},$opt{nodes},$start,$end); 
     $output .= "$node_counts\n";
     $total_nodes = scalar (@{$test_nodes_ref});
     foreach my $node (@{$test_nodes_ref}) {
         $output .= "$node (" . $$test_ip_ref{$node} . ")\n";
     }
     $node_list = join( ',', @{$test_nodes_ref} );
-} elsif ( $opt{nodes} ) {                        # Note: With the --nodes option, ignore --n
+} elsif ( $opt{nodes} ) {  # Note: With the --nodes option, ignore --n
     @test_nodes = split(',', $opt{nodes});
     $total_nodes = scalar (@test_nodes);
     $node_list = $opt{nodes};
     $test_nodes_ref = \@test_nodes;
-} else {
-    $output .= "\n[$date] Obtaining list of nodes to test from Esmond central data store...\n";
+} else {                   # Obtain list of nodes to test from Esmond central data store
     ($node_counts,$test_nodes_ref,$test_ip_ref) = get_nodes($opt{test},$opt{n},$start,$end);
     $output .= "$node_counts\n";
     $total_nodes = scalar (@{$test_nodes_ref});
@@ -270,60 +294,12 @@ if ( $mesh_selection ) {                         # Note: nodes not in the select
     $node_list = join( ',', @{$test_nodes_ref} );
 }
 
+# -----------------------------------------------------------------------------
+# remote data collection
 
-
-$output .= "\nExecuting:\n";
-if ( $opt{mesh_menu} || $opt{mesh} ) {
-    my $command = "./verify --central $ds --port $port --mesh '$mesh_selection' --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
-    $output .= $command;
-} else {
-    my $command = "./verify --central $ds --port $port --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
-    $output .= $command;
-}
-
-$date = gmtime();
-$output .= "\n[$date] Obtaining data from Esmond central data store...\n";
-my %central_nodes=();
-my @central=();
-my @all_central=();
-foreach my $node (@{$test_nodes_ref}) {
-    # Get data related to the node
-    my $res=undef;
-    my @args=();
-       push @args, $test_selection;
-       push @args, $node;
-       push @args, $start;
-       push @args, $end;
-       push @args, $ds;
-       push @args, $port;
-    ($res,@central) = call_with_timeout('Central',\&gd,\@args,$TIMEOUT,$VERBOSE,'USR2');
-    if ( !defined $central[0] ) {
-        $output .= "Node $node rejected. Cause:\n";
-        $output .= "    No data in central store.\n";
-    } elsif ( $central[0] !~ m/Error/  && $res == 1 ) {  # node accepted for comparison
-        push @{ $central_nodes{$node} }, @central;
-    } elsif ( $res == 1 ) {
-        $output .= "Data in central store for $node rejected.\n";
-        $output .= "    Cause: $central[0]\n";
-        $timeout = 0;
-    } else {
-        $output .= "Data from central store unavailable. No comparisons possible at this time.\n";
-        $output .= "    Cause: $central[0]\n";
-        end();
-        exit(0);
-    }
-}
-
-my $count = keys %central_nodes;
-if ( $count == 0 ) {
-    $output .= "Data from central store unavailable. No comparisons possible at this time.\n";
-    $output .= "    Cause: Data gathering timed out\n";
-    end();
-    exit(0);
-}
-
-$output .= "\n\n__________\n\n";
-$output .= "Obtaining data directly from perfSONAR nodes...\n";
+my $remote_output=undef;
+$remote_output .= "\n\n__________\n\n";
+$remote_output .= "Obtaining data directly from perfSONAR nodes...\n";
 my %accepted_nodes=();
 my %remote_nodes=();
 my @remote=();
@@ -342,42 +318,30 @@ foreach my $node (@{$test_nodes_ref}) {
 
     # Exclude from comparison nodes that are unreachable or have timed out
     if ( !defined $remote[0] ) {
-        $output .= "Remote node $node rejected. Cause:\n";
-        $output .= "    No data available.\n";
+        $remote_output .= "Remote node $node rejected. Cause:\n";
+        $remote_output .= "    No data available.\n";
     } elsif ( $remote[0] !~ m/Error/ && $res == 1 ) {
-        $output .= "\nRemote node $node accepted\n\n";
+        $remote_output .= "\nRemote node $node accepted\n\n";
         $accepted_nodes{$node} = 1;
         push @{ $remote_nodes{$node} }, @remote;
     } elsif ( $res == 0 ) {
-        $output .= "\nRemote node $node rejected.\n";
-        $output .= "    Cause: $remote[0]\n\n";
+        $remote_output .= "\nRemote node $node rejected.\n";
+        $remote_output .= "    Cause: $remote[0]\n\n";
     } else {
-        $output .= "\nRemote node $node rejected.\n";
-        $output .= "    Cause: $remote[0]\n\n";
+        $remote_output .= "\nRemote node $node rejected.\n";
+        $remote_output .= "    Cause: $remote[0]\n\n";
     }
 }
 
-
-# Gather all data to be compared
+# Gather remote data to be compared
 foreach my $node (keys %accepted_nodes) {
-    push @all_central, @{ $central_nodes{$node} } if ( defined $central_nodes{$node} );
-    push @all_remote,  @{ $remote_nodes{$node} } if ( defined $remote_nodes{$node} );
+ push @all_remote,  @{ $remote_nodes{$node} } if ( defined $remote_nodes{$node} );
 }
-
-
-my $all_central_size = scalar @all_central;
 my $all_remote_size = scalar @all_remote;
-$output .= "\nComparing $all_central_size records from the central store to $all_remote_size records from perfSONAR hosts\n";
 
 if ( $opt{out} ) {
     my $fh;
-    my $file_name = $opt{out} . '-' . $now . '.central';
-    open($fh, '>', "$file_name");
-    foreach my $rec (@all_central) {
-        print $fh "$rec\n";
-    }
-    close $fh;
-    $file_name = $opt{out} . '-' . $now . '.remote';
+    my $file_name = $opt{out} . '-' . $now . '.remote';
     open($fh, '>', "$file_name");
     foreach my $rec (@all_remote) {
         print $fh "$rec\n";
@@ -385,14 +349,109 @@ if ( $opt{out} ) {
     close $fh;
 }
 
-$output .= "checking for discrepancies...\n";
-threewaycompare(\@all_central,\@all_remote,$display,$opt{out});
 
-end();
+# -----------------------------------------------------------------------------
+
+# central data collection
+
+my $logtime=undef;
+my $ds=undef;
+my $ds_short=undef;
+my $port=undef;
+foreach $ds (sort keys %ch_port) {
+    $port = $ch_port{$ds};
+    my @p = split('\.',$ds);
+    $ds_short = $p[0];
+
+    $logtime = gmtime();
+    $output  = "\n\n__________________________________________________________\n\n";
+    $output .= "Started script (pid $$) at:   $logtime UTC\n";
+    $output .= "\nInitiating a sample comparison between $test_selection archives in the\n";
+    $output .= "Esmond data store ($ds:$port) and remote perfSONAR nodes.\n";
+    $output .= "Selected UTC start time: " . sec2date( $start ) . " (UNIX time: $start)\n";
+    $output .= "Selected UTC end   time: " . sec2date( $end ) . " (UNIX time: $end)\n";
+    $output .= "Selected mesh: $mesh_selection\n" if ( $mesh_selection );
+
+    $output .= "\nExecuting:\n";
+    if ( $opt{mesh_menu} || $opt{mesh} ) {
+        my $command =
+           "./$Script --central $ds:$port --mesh '$mesh_selection' --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
+        $output .= $command;
+    } else {
+        my $command =
+           "./$Script --central $ds:$port --test $test_selection --nodes $node_list --start $start --end $end --display $display\n";
+        $output .= $command;
+    }
+
+    $date = gmtime();
+    $output .= "\n[$date] Obtaining data from Esmond central data store...\n";
+    my %central_nodes=();
+    my @central=();
+    my @all_central=();
+    foreach my $node (@{$test_nodes_ref}) {
+        # Get data related to the node
+        my $res=undef;
+        my @args=();
+           push @args, $test_selection;
+           push @args, $node;
+           push @args, $start;
+           push @args, $end;
+           push @args, $ds;
+           push @args, $port;
+        ($res,@central) = call_with_timeout('Central',\&gd,\@args,$TIMEOUT,$VERBOSE,'USR2');
+        if ( !defined $central[0] ) {
+            $output .= "Node $node rejected. Cause:\n";
+            $output .= "    No data in central store.\n";
+        } elsif ( $central[0] !~ m/Error/  && $res == 1 ) {  # node accepted for comparison
+            push @{ $central_nodes{$node} }, @central;
+        } elsif ( $res == 1 ) {
+            $output .= "Data in central store $ds:$port for $node rejected.\n";
+            $output .= "    Cause: $central[0]\n";
+            $timeout = 0;
+        } else {
+            $output .= "Data from central store $ds:$port unavailable. No comparisons possible at this time.\n";
+            $output .= "    Cause: $central[0]\n";
+            end();
+        }
+    }
+
+    my $count = keys %central_nodes;
+    if ( $count == 0 ) {
+        $output .= "Data from central store $ds:$port unavailable. No comparisons possible at this time.\n";
+        $output .= "    Cause: Data gathering timed out\n";
+        end();
+    }
+
+    # -----------------------------------------------------------------------------
+    $output .= $remote_output;
 
 
-gen_links(\$output,$test_selection,$ds,$port);
+    # Gather central data to be compared
+    foreach my $node (keys %accepted_nodes) {
+        push @all_central, @{ $central_nodes{$node} } if ( defined $central_nodes{$node} );
+    }
+    my $all_central_size = scalar @all_central;
 
+
+    $output .= "\nComparing $all_central_size records from the central store to $all_remote_size records from perfSONAR hosts\n";
+
+    if ( $opt{out} ) {
+        my $fh;
+        my $file_name = $opt{out} . '-' . $ds_short . '-' . $now . '.central';
+        open($fh, '>', "$file_name");
+        foreach my $rec (@all_central) {
+            print $fh "$rec\n";
+        }
+        close $fh;
+    }
+
+    $output .= "checking for discrepancies...\n";
+    threewaycompare(\@all_central,\@all_remote,$display,$opt{out},$ds_short);
+
+    end();
+
+    gen_links(\$output,$test_selection,$ds_short,$ds,$port);
+}
 
 # ---
 
@@ -844,7 +903,7 @@ sub parse_line {
 
 
 sub threewaycompare {
-    my ($cref,$rref,$display,$prefix) = @_;
+    my ($cref,$rref,$display,$prefix,$cshort) = @_;
 
     my %set1=();             # hash lookup table for $set1
     my %set2=();             # hash lookup table for $set2
@@ -860,7 +919,7 @@ sub threewaycompare {
     my $file_name=undef;
     my $dh=undef;
     if ( defined $prefix ) {
-        $file_name = $prefix . '-' . $now . '.diff';
+        $file_name = $prefix . '-' . $cshort . '-' . $now . '.diff';
         open($dh, '>', "$file_name");
     }
 
@@ -1211,7 +1270,7 @@ sub get_node_ips {
 
 
 sub gen_links {
-    my ($str_ref,$test_selection,$ds,$port) = @_;
+    my ($str_ref,$test_selection,$ds_short,$ds,$port) = @_;
 
     my @f    = ();
     my $time = undef;
@@ -1222,42 +1281,51 @@ sub gen_links {
     my $encoded_mon = undef;
     my $central = $ds . ':' . $port;
 
+    my $lh=undef;
+    my $log_file=undef;
+    if ( $opt{split_logs} ) {
+        $log_file = $LOGS . '/' . $test_selection . '_' . $ds_short . '_' . $Script . '.log';
+        open($lh, '>>', $log_file) or die "Could not open file '$log_file' $!";
+    } else {
+        $lh = *STDOUT;   # typeglob
+    }
+
     my @lines = split('\n', $$str_ref);
     my $line=undef;
 
     while ( scalar (@lines) > 0 ) {
         $line = shift @lines;
         if ( $line =~ m/Started/ ) {
-            print "_" x120;
-            print "\n\n$line\n";
+            print {*$lh} "_" x120;
+            print {*$lh} "\n\n$line\n";
             $line = shift @lines;
-            print "$line\n";
+            print {*$lh} "$line\n";
             $line = shift @lines;
-            print "$line\n";
+            print {*$lh} "$line\n";
             $line = shift @lines;
-            print "$line\n";
+            print {*$lh} "$line\n";
             $line = shift @lines;
-            print "$line\n";
+            print {*$lh} "$line\n";
             $line = shift @lines;
-            print "$line\n";
+            print {*$lh} "$line\n";
         }
         if ( $line =~ m/verify/ ) {
-            print "\n$line\n";
+            print {*$lh} "\n$line\n";
             while ( scalar (@lines) > 0 ) {
                 $line = shift @lines;
                 if ( $line =~ m/rejected/ ) {
-                    print "\n$line\n";
+                    print {*$lh} "\n$line\n";
                     $line = shift @lines;
-                    print "$line\n";
+                    print {*$lh} "$line\n";
                 }
                 if ( $line =~ m/Comparing/ ) {
                     my $past_Validation = 0;
-                    print "\n$line\n";
+                    print {*$lh} "\n$line\n";
                     while ( scalar (@lines) > 0 ) {
                         $line = shift @lines;
                         if ( $line !~ m/Ended script/ ) {
                             $past_Validation = 1 if ( $line =~ m/Validation/ );
-                            print "$line\n" if ( $line !~ m/^c:/ && $line !~ m/^r:/ );
+                            print {*$lh} "$line\n" if ( $line !~ m/^c:/ && $line !~ m/^r:/ );
                             if ( $line =~ m/^r:/ ) {
                                 @f = split(' ', $line);
                                 @f = split(',', $f[1]);
@@ -1267,8 +1335,8 @@ sub gen_links {
                                 $mk = $f[5];
                                 chop $mk;        # remove ending colon
                                 $uri="http://$encoded_mon/esmond/perfsonar/archive/$mk/$test_selection/base\?time-start=$time\&time-end=$time\&format=json";
-                                print "$uri\n";
-                                print "\n" if ( !$past_Validation );
+                                print {*$lh} "$uri\n";
+                                print {*$lh} "\n" if ( !$past_Validation );
                             }
                             if ( $line =~ m/^c:/ ) {
                                 @f = split(' ', $line);
@@ -1278,10 +1346,10 @@ sub gen_links {
                                 $mon = $f[2];
                                 $encoded_mon = uri_escape($mon);
                                 $uri="http://$central/esmond/perfsonar/archive/$cmk/$test_selection/base\?time-start=$time\&time-end=$time\&format=json";
-                                print "$uri\n";
+                                print {*$lh} "$uri\n";
                             }
                         } else {
-                            print "$line\n";
+                            print {*$lh} "$line\n";
                             last;
                         }
                     }
@@ -1310,10 +1378,11 @@ sub help {
     against, along with start and end times. This is helpful when interested in repeating the same test.
     
     Options
-    --central    - String. The host name or IP address of the central repository  
-    --port       - Optional integer. Port used to access the central repository. Default is 80.
+    --central    - Comma-separated string. The host name or IP address of one or more central repositories, each optionally
+                   followed by a colon (:) and a port number. Default port number is 80. Alternatively, use 'all' to select
+                   all central repositories, in which case the host names and ports are obtained from the configuration file.
     --mesh       - String. The mesh to use  
-    --mesh_menu  - Integer. Allows selection of a mesh from a list. Helpful when the mesh name is not known.
+    --mesh_menu  - Integer. Allows selection of a mesh from a list. Helpful when the mesh name is not known. 
     --test       - String. The test type to select. Available types are:
                    failures, histogram-owdelay, histogram-ttl, packet-count-lost, packet-count-sent, packet-loss-rate,
                    packet-retransmits, packet-retransmits-subintervals, packet-trace, throughput, throughput-subinterval
@@ -1336,36 +1405,48 @@ sub help {
                    (either by not using it or with --display all)
                    --display validate => show alteration and validation
                    --display coverage => show alteration and coverage
-    --out        - Optional path and file name prefix. Outputs raw data to three different files. File names are of format
-                   "path/prefix-[timestamp].[source]", where timestamp refers to the UNIX time the script ran and source is
-                   "central" for the central store, "remote" for perfSONAR hosts, "diff" for their comparison.
+    --out        - Optional path and file name prefix for collected data used in generating the log. Remote data is written to
+                   "path/prefix-[timestamp].remote"; the other file names take the format "path/prefix-[host]-[timestamp].[source]".
+                   The central store short name goes in [host], [timestamp] refers to the UNIX time the script ran and [source] is
+                   "central" for the central store, or "diff" for the remote/central comparison.
+    --split_logs - Optional. The $Script script generally outputs results to STDOUT. Use this option when it is desired to output
+                   results to different log files, each corresponding to a central store identified in the --central option.
     --update     - Optional. Mesh, node, and IP address information is updated regularly by update scripts in this repository.
-                   This option forces an update to occur prior to running verify. Note: The update may take a few minutes to
+                   This option forces an update to occur prior to running $Script. Note: The update may take a few minutes to
                    complete and is meant to be used sparingly.
     --help       - Displays this information
  
     Sample Usage  
     - Compare pack-count-sent data between the central store (psds1.grid.iu.edu) and two script-selected perfSONAR hosts
-      that collect pack-count-sent data for a script-selected time range  
+      that collect pack-count-sent data for a script-selected time range. Output results to STDOUT.  
       $Script --central psds1.grid.iu.edu --test packet-count-sent --n 2
     
     - Compare packet-loss-rate data between the central data store and one script-selected host, returning only alteration
-      and validation differences; i.e., ignoring coverage test results  
-      $Script --test packet-loss-rate --central psds-itb.grid.iu.edu --n 1 --display validate
+      and validation differences; i.e., ignoring coverage test results to STDOUT.  
+      $Script --test packet-loss-rate --central psds2.grid.iu.edu --n 1 --display validate
     
     - Compare packet-count-sent data from the central repository, using port 9090, with data from two specified hosts for
       the specified time range  
-      $Script --central fermicloud171.fnal.gov --port 9090 --test packet-count-sent \
+      $Script --central fermicloud171.fnal.gov:9090 --test packet-count-sent \
              --nodes sonar2.itim-cj.ro,perfsonar01.cmsaf.mit.edu --start 1434800261 --end 1434875281
     
     - Request a comparison with specific perfSONAR hosts in a given mesh for a specified time range  
-      $Script --central fermicloud171.fnal.gov --port 9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals \
-             --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 07/02/2015,05:29:28 --end_date 07/02/2015,10:52:01 --display all
+      $Script --central fermicloud171.fnal.gov:9090 --mesh 'USATLAS Bandwidth Mesh Test' --test throughput-subintervals \
+             --nodes psum02.aglt2.org,ps2.ochep.ou.edu --start_date 09/12/2015,05:29:28 --end_date 09/12/2015,10:52:01
+   
+    - Compare throughput data between all central stores (identified it the config file) and four script-selected perfSONAR
+      hosts which collect throughput data in the given mesh for a script-selected time range. Store raw data in files with
+      prefix ../logs/vtest and output final results to separate throughput log files, according to the selected central stores.
+      $Script -central all --mesh 'USATLAS Bandwidth Mesh Test' --test throughput -n 4 --out ../logs/vtest --split_logs
+   
+    - Compare failures data between two specified central hosts and three script-selected perfSONAR hosts which collect failures
+      data in the given mesh for a script-selected time range. Output results to STDOUT.
+      $Script -central fermicloud171.fnal.gov:9090,psds1.grid.iu.edu --mesh 'USATLAS Bandwidth Mesh Test' --test throughput -n 3
     
     - Allow user to select a test type and mesh from option lists  
-      $Script --central fermicloud171.fnal.gov --port 9090 --mesh_menu --test_menu -n 2
-
+      $Script --central fermicloud171.fnal.gov:9090 --mesh_menu --test_menu -n 2
+   
     $Script version $VERSION
-
+   
 EOF
 }

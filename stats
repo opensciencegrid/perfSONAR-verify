@@ -13,7 +13,7 @@
 # default is plain text output.
 
 # Examples:
-# stats ../logs fermicloud
+# stats ../logs fermicloud171
 # stats ../logs psds1 --JSON
 
 use strict;
