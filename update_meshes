@@ -120,10 +120,12 @@ sub update_meshes {
     my %mm = ();
 
     # Obtain mesh list
-    my $mesh_links = decode_json(`curl -s $PSMESH_LINK | python -mjson.tool`);
+    my $json = `curl -s $PSMESH_LINK | python -mjson.tool`;
+    my $mesh_links = decode_json($json);
     foreach my $link (@{$mesh_links}) {
         # Obtain mesh members
-        my $member_md = decode_json(`curl -s "$link->{include}->[0]" | python -mjson.tool`);
+        my $js = `curl -s "$link->{include}->[0]" | python -mjson.tool`;
+        my $member_md = decode_json($js);
         foreach my $test (@{$member_md->{tests}}) {
             $mm{$test->{description}} = $test->{members};
         }
